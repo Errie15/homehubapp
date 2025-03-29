@@ -1,59 +1,45 @@
-# HomeHub
+-- Först ta bort eventuella triggers
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 
-HomeHub är en modern app för att organisera hushållet på ett roligt och engagerande sätt. Appen hjälper familjer och delade hushåll att fördela uppgifter, schemalägga aktiviteter och motivera varandra genom ett poängbaserat belöningssystem.
+-- Ta bort funktioner
+DROP FUNCTION IF EXISTS public.handle_new_user();
 
-## Funktioner
+-- Ta bort policys (inte nödvändigt om vi tar bort tabellerna, men bra för tydlighetens skull)
+DROP POLICY IF EXISTS "Användare kan se sin egen profil" ON profiles;
+DROP POLICY IF EXISTS "Användare kan se profiler från samma hushåll" ON profiles;
+DROP POLICY IF EXISTS "Användare kan uppdatera sin egen profil" ON profiles;
 
-- 📝 **Uppgiftshantering**: Skapa, tilldela och spåra uppgifter i hushållet
-- 📅 **Schemaläggning**: Skapa veckoscheman för återkommande sysslor
-- 🏆 **Belöningar**: Motivera med ett poängbaserat belöningssystem
-- 👨‍👩‍👧‍👦 **Samarbete**: Dela uppgifter och scheman med alla i hushållet
+DROP POLICY IF EXISTS "Användare kan se sitt eget hushåll" ON households;
+DROP POLICY IF EXISTS "Användare kan uppdatera sitt eget hushåll" ON households;
 
-## Tech Stack
+DROP POLICY IF EXISTS "Användare kan se uppgifter från sitt hushåll" ON tasks;
+DROP POLICY IF EXISTS "Användare kan lägga till uppgifter i sitt hushåll" ON tasks;
+DROP POLICY IF EXISTS "Användare kan uppdatera uppgifter i sitt hushåll" ON tasks;
+DROP POLICY IF EXISTS "Användare kan ta bort uppgifter i sitt hushåll" ON tasks;
 
-- **Frontend**: Next.js med TypeScript och Tailwind CSS
-- **Backend**: Supabase för autentisering, datalagring och realtidsfunktioner
-- **Deployment**: Vercel
+DROP POLICY IF EXISTS "Användare kan se schemalagda uppgifter från sitt hushåll" ON scheduled_tasks;
+DROP POLICY IF EXISTS "Användare kan lägga till schemalagda uppgifter i sitt hushåll" ON scheduled_tasks;
+DROP POLICY IF EXISTS "Användare kan uppdatera schemalagda uppgifter i sitt hushåll" ON scheduled_tasks;
+DROP POLICY IF EXISTS "Användare kan ta bort schemalagda uppgifter i sitt hushåll" ON scheduled_tasks;
 
-## Komma igång
+DROP POLICY IF EXISTS "Användare kan se belöningar från sitt hushåll" ON rewards;
+DROP POLICY IF EXISTS "Användare kan lägga till belöningar i sitt hushåll" ON rewards;
+DROP POLICY IF EXISTS "Användare kan uppdatera belöningar i sitt hushåll" ON rewards;
+DROP POLICY IF EXISTS "Användare kan ta bort belöningar i sitt hushåll" ON rewards;
 
-### Förutsättningar
+DROP POLICY IF EXISTS "Användare kan se inlösta belöningar från sitt hushåll" ON redeemed_rewards;
+DROP POLICY IF EXISTS "Användare kan lösa in belöningar i sitt hushåll" ON redeemed_rewards;
 
-- Node.js 16+ installerat
-- En Supabase-konto och projekt
-- Vercel-konto för deployment
+-- Ta bort tabeller i rätt ordning (för att respektera foreign keys)
+DROP TABLE IF EXISTS redeemed_rewards;
+DROP TABLE IF EXISTS rewards;
+DROP TABLE IF EXISTS scheduled_tasks;
+DROP TABLE IF EXISTS tasks;
+DROP TABLE IF EXISTS households;
+DROP TABLE IF EXISTS profiles;
 
-### Installation
+-- Nu kan vi skapa våra tabeller och policys på nytt
 
-1. Klona projektet:
-   ```bash
-   git clone https://github.com/ditt-username/homehub.git
-   cd homehub
-   ```
-
-2. Installera beroenden:
-   ```bash
-   npm install
-   ```
-
-3. Skapa en `.env.local` fil i projektets rot med följande innehåll:
-   ```
-   NEXT_PUBLIC_SUPABASE_URL=din-supabase-url
-   NEXT_PUBLIC_SUPABASE_ANON_KEY=din-supabase-anon-key
-   ```
-
-4. Starta utvecklingsservern:
-   ```bash
-   npm run dev
-   ```
-
-5. Öppna [http://localhost:3000](http://localhost:3000) i din webbläsare.
-
-### Databas-setup
-
-1. Skapa följande tabeller i din Supabase-databas:
-
-```sql
 -- Användarprofiler
 CREATE TABLE profiles (
   id UUID REFERENCES auth.users NOT NULL PRIMARY KEY,
@@ -72,6 +58,11 @@ CREATE TABLE households (
   created_by UUID REFERENCES profiles(id),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
+
+-- Lägg till foreign key constraint för profiles -> households
+ALTER TABLE profiles 
+ADD CONSTRAINT fk_household
+FOREIGN KEY (household_id) REFERENCES households(id);
 
 -- Uppgifter
 CREATE TABLE tasks (
@@ -289,27 +280,34 @@ CREATE POLICY "Användare kan lösa in belöningar i sitt hushåll"
     )
   );
 
+-- Speciallösning för cirkulärt beroende mellan profiles och households
+-- Vi behöver en annan approach för att hantera skapandet av första användaren och hushållet
+
 -- Skapa en förbättrad funktion för att automatiskt skapa profiler och hushåll
 CREATE OR REPLACE FUNCTION public.handle_new_user() 
 RETURNS trigger AS $$
 DECLARE
   new_household_id UUID;
 BEGIN
+  -- Skapa först en profil utan household_id
+  INSERT INTO public.profiles (id, name, email, avatar_url, points)
+  VALUES (
+    new.id, 
+    new.raw_user_meta_data->>'full_name',  -- Använd full_name från metadata
+    new.email,                             -- Ta e-post direkt från auth
+    new.raw_user_meta_data->>'avatar_url', 
+    0
+  );
+  
   -- Skapa ett nytt hushåll för användaren
   INSERT INTO public.households (name, created_by)
   VALUES ('Mitt hushåll', new.id)
   RETURNING id INTO new_household_id;
   
-  -- Skapa användarens profil med koppling till det nya hushållet
-  INSERT INTO public.profiles (id, name, email, avatar_url, household_id, points)
-  VALUES (
-    new.id, 
-    new.raw_user_meta_data->>'full_name',  -- Använd full_name från metadata
-    new.email,                            -- Ta e-post direkt från auth
-    new.raw_user_meta_data->>'avatar_url', 
-    new_household_id,                     -- Koppla till det nya hushållet
-    0
-  );
+  -- Uppdatera profilen med household_id
+  UPDATE public.profiles
+  SET household_id = new_household_id
+  WHERE id = new.id;
   
   RETURN new;
 END;
@@ -319,29 +317,4 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
-  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
-```
-
-2. Konfigurera autentisering och behörigheter i Supabase.
-
-## Deployment
-
-### Vercel Deployment
-
-Det enklaste sättet att deploya HomeHub är genom Vercel:
-
-1. Pusha ditt projekt till GitHub.
-2. Besök [Vercel](https://vercel.com) och importera ditt GitHub-repository.
-3. Konfigurera miljövariabler (samma som i `.env.local`).
-4. Klicka på 'Deploy'.
-
-## Roadmap
-
-- Mobilapp med React Native
-- Pushnotiser för uppgiftspåminnelser
-- Integrationer med smarta hem-enheter
-- Utökade statistik och visualiseringar
-
-## Licens
-
-Detta projekt är licensierat under MIT-licensen.
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user(); 
