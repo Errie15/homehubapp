@@ -36,14 +36,27 @@ export async function resetPassword(email: string) {
   });
 }
 
+// Type för task data
+type TaskData = {
+  title: string;
+  description?: string;
+  due_date?: string;
+  status?: string;
+  assigned_to?: string;
+  user_id?: string;
+  household_id?: string;
+  points?: number;
+  [key: string]: unknown;
+};
+
 // Grundläggande databasinteraktioner
-export async function createTask(taskData: any) {
+export async function createTask(taskData: TaskData) {
   return await supabase
     .from('tasks')
     .insert(taskData);
 }
 
-export async function updateTask(id: string, taskData: any) {
+export async function updateTask(id: string, taskData: TaskData) {
   return await supabase
     .from('tasks')
     .update(taskData)

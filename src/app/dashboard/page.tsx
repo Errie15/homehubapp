@@ -1,18 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
 
 export default function DashboardPage() {
   // Demo-data för att visualisera dashboarden
-  const [tasks, setTasks] = useState([
+  const [tasks] = useState([
     { id: 1, title: 'Diska', assignedTo: 'Anna', dueDate: '2023-03-30', completed: false, points: 10 },
     { id: 2, title: 'Dammsuga', assignedTo: 'Erik', dueDate: '2023-03-31', completed: true, points: 15 },
     { id: 3, title: 'Handla mat', assignedTo: 'Anna', dueDate: '2023-04-01', completed: false, points: 20 },
     { id: 4, title: 'Tvätta', assignedTo: 'Erik', dueDate: '2023-04-02', completed: false, points: 25 },
   ]);
 
-  const [householdPoints, setHouseholdPoints] = useState({
+  const [householdPoints] = useState({
     'Anna': 80,
     'Erik': 75
   });

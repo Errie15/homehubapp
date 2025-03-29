@@ -26,7 +26,7 @@ export default function RewardsPage() {
     { id: 4, name: 'Johan', points: 95, avatar: '👦' },
   ]);
 
-  const [rewards, setRewards] = useState<Reward[]>([
+  const [rewards] = useState<Reward[]>([
     { 
       id: 1, 
       title: 'Välj fredagsmys', 

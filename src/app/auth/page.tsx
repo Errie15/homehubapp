@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signIn, signUp } from '@/lib/supabase';
@@ -44,8 +44,9 @@ export default function AuthPage() {
         // Navigera till dashboard
         router.push('/dashboard');
       }
-    } catch (error: any) {
-      setError(error.message || 'Ett fel uppstod. Försök igen senare.');
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Ett fel uppstod. Försök igen senare.';
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
