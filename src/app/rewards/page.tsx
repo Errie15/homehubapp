@@ -140,13 +140,13 @@ export default function RewardsPage() {
             } else if (count !== null) {
               setRedeemedCount(count);
             }
-          } catch (err) {
+          } catch (err: unknown) {
             console.error('Fel vid statistikberäkning för belöningar:', err);
           }
         } else {
           setRedeemedCount(0);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Oväntat fel vid datahämtning:', err);
         setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
@@ -195,7 +195,7 @@ export default function RewardsPage() {
       );
       
       setRedeemedCount(prev => prev + 1);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Oväntat fel vid inlösning:', err);
     }
     
@@ -243,7 +243,7 @@ export default function RewardsPage() {
         points_cost: 100,
         image: '🎁'
       });
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Oväntat fel vid skapande av belöning:', err);
       setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
     }
