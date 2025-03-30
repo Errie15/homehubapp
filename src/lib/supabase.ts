@@ -4,7 +4,14 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://your-project.supabase.co';
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'your-anon-key';
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Skapa Supabase-klienten med persistentSession=true för att förhindra AuthSessionMissingError
+export const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: true, // Behåll session i localStorage
+    autoRefreshToken: true, // Förnya token automatiskt när den går ut
+    detectSessionInUrl: true, // Upptäck och använd sessioner från URL:en
+  }
+});
 
 // Hjälpfunktioner för autentisering
 export async function signIn(email: string, password: string) {
@@ -38,16 +45,51 @@ export async function resetPassword(email: string) {
 
 export async function getCurrentUser() {
   try {
+    // Försök med getSession först för att bekräfta att vi har en giltig session
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError) {
+      console.error("Fel vid hämtning av session:", sessionError);
+      
+      // Om felet är relaterat till saknad session, logga ut användaren och rensa sessionen
+      if (sessionError.message && sessionError.message.includes('Auth session missing')) {
+        console.log("Auth session saknas, återställer sessionen");
+        await supabase.auth.signOut();
+      }
+      
+      return null;
+    }
+    
+    if (!sessionData.session) {
+      console.log("Ingen aktiv session hittades");
+      return null;
+    }
+    
+    // Nu när vi bekräftat att vi har en session, hämta användardata
     const { data, error } = await supabase.auth.getUser();
     
     if (error) {
       console.error("Fel vid hämtning av användare:", error);
+      
+      // Om felet är relaterat till saknad session, logga ut användaren och rensa sessionen
+      if (error.message && error.message.includes('Auth session missing')) {
+        console.log("Auth session saknas vid användarhantering, återställer sessionen");
+        await supabase.auth.signOut();
+      }
+      
       return null;
     }
     
     return data.user;
   } catch (err) {
     console.error("Oväntat fel vid hämtning av användare:", err);
+    
+    // Om det är ett autentiseringsfel, försök rensa sessionen
+    if (err instanceof Error && err.message.includes('Auth session missing')) {
+      console.log("Oväntat auth session-fel, återställer sessionen");
+      await supabase.auth.signOut();
+    }
+    
     return null;
   }
 }
@@ -872,5 +914,164 @@ export async function rejectHouseholdInvitation(invitationId: string) {
       data: null, 
       error: { message: error.message || "Ett oväntat fel uppstod vid avvisning av inbjudan." } 
     };
+  }
+}
+
+// Funktion för att hämta inlösta belöningar för ett hushåll
+export async function getRedeemedRewards(householdId: string) {
+  try {
+    // Validera indata
+    if (!householdId) {
+      console.error('getRedeemedRewards: Ogiltigt household_id');
+      return { data: [], error: { message: 'Ogiltigt household_id' } };
+    }
+
+    // Först hämtar vi alla rewards för hushållet
+    const { data: rewards, error: rewardsError } = await supabase
+      .from('rewards')
+      .select('id')
+      .eq('household_id', householdId);
+      
+    if (rewardsError) {
+      console.error('Fel vid hämtning av rewards för household:', rewardsError);
+      return { data: [], error: rewardsError };
+    }
+    
+    if (!rewards || rewards.length === 0) {
+      // Inga belöningar finns, returnera tom lista utan fel
+      return { data: [], error: null };
+    }
+    
+    // Sedan hämtar vi alla inlösta belöningar för dessa rewards
+    // Vi exkluderar created_at eftersom den kolumnen inte existerar
+    const { data: redeemedData, error: redeemedError } = await supabase
+      .from('redeemed_rewards')
+      .select(`
+        id,
+        reward_id,
+        user_id,
+        rewards:reward_id (
+          id, 
+          title, 
+          description, 
+          points_cost, 
+          image, 
+          household_id
+        )
+      `)
+      .in('reward_id', rewards.map(r => r.id));
+      
+    if (redeemedError) {
+      console.error('Fel vid hämtning av redeemed_rewards:', redeemedError);
+      return { data: [], error: redeemedError };
+    }
+    
+    if (!redeemedData || redeemedData.length === 0) {
+      // Inga inlösta belöningar finns, returnera tom lista utan fel
+      return { data: [], error: null };
+    }
+    
+    // För varje inlöst belöning, hämta användarinformation separat men med getUserProfile
+    // vilket hanterar RLS-begränsningar bättre
+    const enhancedData = await Promise.all(
+      redeemedData.map(async (redeemedReward) => {
+        try {
+          // Konsistentkontroll på rewards-objektet
+          const rewards = redeemedReward.rewards;
+          
+          // Om rewards är en array, använd första elementet
+          const rewardsObject = Array.isArray(rewards) && rewards.length > 0 
+            ? rewards[0] 
+            : (rewards || {
+                id: redeemedReward.reward_id,
+                title: 'Okänd belöning',
+                description: null,
+                points_cost: 0,
+                image: null,
+                household_id: householdId
+              });
+              
+          // Använd getUserProfile istället för direkt anrop till profiles-tabellen  
+          // Detta hanterar RLS-begränsningar och returnerar alltid ett profilobjekt med åtminstone ett ID
+          const { data: profileData, error: profileError } = await getUserProfile(redeemedReward.user_id);
+          
+          if (profileError || !profileData) {
+            console.warn('Varning: Kunde inte hämta fullständig profil för användare:', 
+                         redeemedReward.user_id, 
+                         profileError ? profileError.message || JSON.stringify(profileError) : 'Ingen data');
+                         
+            // Returnera default-värden om vi inte kan hämta profilen
+            return {
+              id: redeemedReward.id,
+              reward_id: redeemedReward.reward_id,
+              user_id: redeemedReward.user_id,
+              // Lägg till ett datum för sortering (nuvarande datum)
+              created_at: new Date().toISOString(),
+              rewards: rewardsObject,
+              profiles: {
+                id: redeemedReward.user_id,
+                full_name: "Användare",
+                email: "användare@exempel.se",
+                avatar_url: null
+              }
+            };
+          }
+          
+          return {
+            id: redeemedReward.id,
+            reward_id: redeemedReward.reward_id,
+            user_id: redeemedReward.user_id,
+            // Lägg till ett datum för sortering (nuvarande datum)
+            created_at: new Date().toISOString(),
+            rewards: rewardsObject,
+            profiles: {
+              id: profileData.id,
+              full_name: profileData.full_name || null,
+              email: profileData.email || null,
+              avatar_url: profileData.avatar_url || null
+            }
+          };
+        } catch (itemErr) {
+          // Hantera fel på individuell belöningsnivå för att förhindra att hela operationen misslyckas
+          console.error('Fel vid bearbetning av inlöst belöning:', 
+                       redeemedReward.id, 
+                       itemErr instanceof Error ? itemErr.message : 'Okänt fel');
+                       
+          // Returnera en basversion med default-värden
+          return {
+            id: redeemedReward.id,
+            reward_id: redeemedReward.reward_id,
+            user_id: redeemedReward.user_id,
+            created_at: new Date().toISOString(),
+            rewards: {
+              id: redeemedReward.reward_id,
+              title: 'Belöning',
+              description: null,
+              points_cost: 0,
+              image: null,
+              household_id: householdId
+            },
+            profiles: {
+              id: redeemedReward.user_id,
+              full_name: null,
+              email: null,
+              avatar_url: null
+            }
+          };
+        }
+      })
+    );
+    
+    // Sortera resultat med de senaste först (baserat på id eftersom created_at inte finns)
+    const sortedData = enhancedData.sort((a, b) => {
+      // Sortera efter id i fallande ordning (nyare IDs antas ha högre värden)
+      return b.id.localeCompare(a.id);
+    });
+    
+    return { data: sortedData, error: null };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Ett oväntat fel uppstod';
+    console.error('Oväntat fel vid hämtning av inlösta belöningar:', err);
+    return { data: [], error: { message: errorMessage } };
   }
 }

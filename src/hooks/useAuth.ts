@@ -207,6 +207,19 @@ export function useAuth() {
         });
       } catch (err) {
         console.error('Fel vid inläsning av användare:', err);
+        
+        // Hantera AuthSessionMissingError 
+        if (err instanceof Error && err.message && err.message.includes('Auth session missing')) {
+          console.log('Auth-session saknas, återställer och omdirigerar till inloggningssidan');
+          // Rensa lokal cache
+          supabase.auth.signOut().then(() => {
+            if (typeof window !== 'undefined') {
+              window.location.href = '/auth';
+            }
+          });
+          return;
+        }
+        
         setState(prev => ({
           ...prev,
           isLoading: false,
@@ -239,7 +252,7 @@ export function useAuth() {
       console.error('Fel vid uppsättning av auth-lyssnare:', error);
       // Återställ sessionen om vi får ett autentiseringsfel
       if (typeof window !== 'undefined' && error.message && error.message.includes('Auth session missing')) {
-        console.log('Auth-session saknas, återställer och omdirigerar till inloggningssidan');
+        console.log('Auth-session saknas i lyssnaren, återställer och omdirigerar till inloggningssidan');
         // Rensa lokal cache
         supabase.auth.signOut().then(() => {
           window.location.href = '/auth';

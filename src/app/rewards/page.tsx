@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
 import { useAuth } from '@/hooks/useAuth';
-import { supabase, ensureUserHasHousehold, getHouseholdMembers } from '@/lib/supabase';
+import { supabase, ensureUserHasHousehold, getHouseholdMembers, getRedeemedRewards } from '@/lib/supabase';
 
 type Member = {
   id: string;
@@ -22,10 +22,32 @@ type Reward = {
   household_id: string;
 };
 
+type RedeemedReward = {
+  id: string;
+  reward_id: string;
+  user_id: string;
+  created_at: string;
+  rewards: {
+    id: string;
+    title: string | null;
+    description: string | null;
+    points_cost: number | null;
+    image: string | null;
+    household_id: string | null;
+  };
+  profiles: {
+    id: string;
+    full_name: string | null;
+    email: string | null;
+    avatar_url: string | null;
+  };
+};
+
 export default function RewardsPage() {
   const { profile } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
+  const [redeemedRewards, setRedeemedRewards] = useState<RedeemedReward[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
@@ -125,6 +147,62 @@ export default function RewardsPage() {
         } else if (rewardsData) {
           setRewards(rewardsData);
         }
+
+        // Hämta inlösta belöningar
+        const { data: redeemedData, error: redeemedError } = await getRedeemedRewards(profile.household_id);
+        
+        if (redeemedError) {
+          console.error('Fel vid hämtning av inlösta belöningar:', redeemedError);
+          setError(`Fel vid hämtning av inlösta belöningar: ${redeemedError.message || 'Okänt fel'}`);
+        } else if (redeemedData) {
+          try {
+            // Säkerställ att data följer förväntad struktur
+            const processedData = redeemedData.map(item => {
+              try {
+                // Validera och säkerställ alla nödvändiga fält
+                if (!item) return null;
+                
+                // Konvertera rewards till korrekt format om det är en array
+                const rewards = Array.isArray(item.rewards) && item.rewards.length > 0 
+                  ? item.rewards[0] 
+                  : (item.rewards || {
+                      id: item.reward_id || '',
+                      title: 'Okänd belöning',
+                      description: null,
+                      points_cost: 0,
+                      image: null,
+                      household_id: profile.household_id || null
+                    });
+                    
+                // Säkerställ profiles-objektet
+                const profiles = item.profiles || {
+                  id: item.user_id || 'unknown',
+                  full_name: null,
+                  email: 'användare',
+                  avatar_url: null
+                };
+                
+                return {
+                  id: item.id || `temp-${Math.random().toString(36).substring(7)}`,
+                  reward_id: item.reward_id || '',
+                  user_id: item.user_id || '',
+                  created_at: item.created_at || new Date().toISOString(),
+                  rewards: rewards,
+                  profiles: profiles
+                } as RedeemedReward;
+              } catch (itemError) {
+                console.warn('Fel vid bearbetning av belöningsdata:', itemError);
+                return null;
+              }
+            }).filter(Boolean) as RedeemedReward[]; // Filtrera bort null-värden
+            
+            setRedeemedRewards(processedData);
+          } catch (processError) {
+            console.error('Fel vid bearbetning av belöningar:', processError);
+            // Fallback till tom lista om bearbetning misslyckas helt
+            setRedeemedRewards([]);
+          }
+        }
         
         // Hämta antal inlösta belöningar för statistik
         if (membersData && membersData.length > 0) {
@@ -172,16 +250,24 @@ export default function RewardsPage() {
         
       if (updateError) {
         console.error('Fel vid uppdatering av poäng:', updateError);
+        setError(`Fel vid uppdatering av poäng: ${updateError.message || JSON.stringify(updateError) || 'Okänt fel'}`);
         return;
       }
       
       // Registrera inlöst belöning
-      const { error: insertError } = await supabase
+      const { data: insertData, error: insertError } = await supabase
         .from('redeemed_rewards')
-        .insert({ reward_id: selectedReward.id, user_id: selectedMember });
+        .insert({ reward_id: selectedReward.id, user_id: selectedMember })
+        .select(`
+          id,
+          reward_id,
+          user_id
+        `)
+        .single();
         
       if (insertError) {
         console.error('Fel vid registrering av inlöst belöning:', insertError);
+        setError(`Fel vid registrering av inlöst belöning: ${insertError.message || JSON.stringify(insertError) || 'Okänt fel'}`);
         return;
       }
       
@@ -195,8 +281,41 @@ export default function RewardsPage() {
       );
       
       setRedeemedCount(prev => prev + 1);
+      
+      // Lägg till den nya inlösta belöningen i listan med korrekt format
+      if (insertData) {
+        try {
+          const newRedeemedReward: RedeemedReward = {
+            id: insertData.id,
+            reward_id: insertData.reward_id,
+            user_id: insertData.user_id,
+            created_at: new Date().toISOString(),
+            rewards: {
+              id: selectedReward.id,
+              title: selectedReward.title,
+              description: selectedReward.description,
+              points_cost: selectedReward.points_cost,
+              image: selectedReward.image,
+              household_id: selectedReward.household_id
+            },
+            profiles: {
+              id: selectedMember,
+              full_name: member.full_name || null,
+              email: member.email || null,
+              avatar_url: member.avatar_url || null
+            }
+          };
+          
+          setRedeemedRewards(prev => [newRedeemedReward, ...prev]);
+        } catch (formatErr) {
+          console.error('Fel vid formatering av ny inlöst belöning:', formatErr);
+          // Även om formatering misslyckas fortsätter vi, eftersom data redan har sparats i databasen
+        }
+      }
     } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : 'Okänt fel';
       console.error('Oväntat fel vid inlösning:', err);
+      setError(`Oväntat fel vid inlösning: ${errorMsg}`);
     }
     
     setIsModalOpen(false);
@@ -351,7 +470,7 @@ export default function RewardsPage() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden mb-8">
           <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <h2 className="text-xl font-semibold">Tillgängliga belöningar</h2>
             <button 
@@ -399,6 +518,39 @@ export default function RewardsPage() {
                     Skapa din första belöning
                   </button>
                 </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Sektion för inlösta belöningar */}
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+            <h2 className="text-xl font-semibold">Inlösta belöningar</h2>
+          </div>
+          <div className="p-6">
+            <div className="space-y-4">
+              {redeemedRewards.length > 0 ? (
+                redeemedRewards.map((redeemed) => (
+                  <div key={redeemed.id} className="bg-gray-50 dark:bg-gray-900 rounded-lg p-4">
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-xl">
+                        {redeemed.rewards.image || '🎁'}
+                      </div>
+                      <div className="ml-4 flex-1">
+                        <h3 className="font-medium">{redeemed.rewards?.title || 'Okänd belöning'}</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          Inlöst av {redeemed.profiles?.full_name || redeemed.profiles?.email || 'Okänd användare'} • {redeemed.created_at ? new Date(redeemed.created_at).toLocaleDateString('sv-SE') : 'Okänt datum'}
+                        </p>
+                      </div>
+                      <div className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                        {redeemed.rewards?.points_cost || 0} poäng
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-center text-gray-500 py-4">Inga inlösta belöningar ännu</p>
               )}
             </div>
           </div>
