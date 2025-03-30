@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Sidebar from "@/components/navigation/Sidebar";
 import Button from "@/components/ui/Button";
 import Avatar from "@/components/ui/Avatar";
@@ -31,7 +31,8 @@ interface HouseholdSettings {
   deleteAfterDays: number;
 }
 
-export default function SettingsPage() {
+// Innehållskomponent som använder useSearchParams
+function SettingsPageContent() {
   const { user, profile } = useAuth();
   const searchParams = useSearchParams();
   const sectionParam = searchParams.get("section");
@@ -791,5 +792,14 @@ export default function SettingsPage() {
         </Modal>
       </div>
     </Sidebar>
+  );
+}
+
+// Huvudkomponenten som wrappar innehållet med Suspense
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Laddar...</div>}>
+      <SettingsPageContent />
+    </Suspense>
   );
 } 
