@@ -1,26 +1,24 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
-import { supabase, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase, ensureUserHasHousehold, getHouseholdMembers } from '@/lib/supabase';
 
 type Member = {
   id: string;
-  full_name?: string;
-  name?: string; // För kompatibilitet
   email: string;
+  full_name?: string | null;
+  avatar_url?: string | null;
   points: number;
-  avatar_url?: string;
-  role?: string;
 };
 
 type Reward = {
   id: string;
   title: string;
-  description: string;
+  description: string | null;
   points_cost: number;
-  image: string;
+  image: string | null;
   household_id: string;
 };
 
@@ -29,11 +27,43 @@ export default function RewardsPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
   const [selectedMember, setSelectedMember] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [redeemedCount, setRedeemedCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [newReward, setNewReward] = useState<{
+    title: string;
+    description: string;
+    points_cost: number;
+    image: string;
+  }>({
+    title: '',
+    description: '',
+    points_cost: 100,
+    image: '🎁'
+  });
+
+  // Lista med emoji-ikoner för belöningar
+  const rewardIcons = ['🎁', '🏆', '🎮', '📱', '🍕', '🍦', '🎬', '🎯', '🎨', '📚', '🧸', '🎭', '🎪', '🎠', '🎡'];
+
+  // Funktion för att beräkna topprankad medlem på ett säkert sätt
+  const getTopMemberName = (): string => {
+    if (members.length === 0) return '-';
+    
+    let topPoints = -1;
+    let topName = '-';
+    
+    for (const member of members) {
+      if (member.points > topPoints) {
+        topPoints = member.points;
+        topName = member.full_name || member.email || '-';
+      }
+    }
+    
+    return topName;
+  };
 
   useEffect(() => {
     async function fetchData() {
@@ -45,46 +75,31 @@ export default function RewardsPage() {
       try {
         // Om användaren inte har ett hushåll, försök skapa ett
         if (!profile.household_id) {
-          setError('Användaren saknar hushåll. Försöker skapa ett...');
-          
-          // Försök skapa ett hushåll och uppdatera profilen
-          const { data: updatedProfile, error: householdError } = await ensureUserHasHousehold(
+          const { data: householdData, error: householdError } = await ensureUserHasHousehold(
             profile.id, 
             profile
           );
           
-          // Även om det finns ett fel, kontrollera om vi fick ett hushålls-ID tillbaka
-          // Detta händer när hushållet skapades men profilen inte kunde uppdateras i databasen
-          const hasHouseholdId = updatedProfile?.household_id || false;
+          if (householdError) {
+            console.error('Fel vid skapande av hushåll:', householdError);
+            setError(`Fel vid skapande av hushåll: ${householdError.message || 'Okänt fel'}`);
+            setLoading(false);
+            return;
+          }
           
-          if (householdError && !hasHouseholdId) {
-            setError(`Kunde inte skapa hushåll: ${householdError.message || 'Okänt fel'}`);
-            setLoading(false);
-            return;
-          } else if (householdError && hasHouseholdId) {
-            // Hushållet skapades men kunde inte länkas permanent till profilen
-            // Vi kan fortfarande använda det för denna session
-            setError('Hushåll skapades, men kunde inte länkas permanent till profilen. Sessionen fortsätter temporärt.');
-            profile.household_id = updatedProfile.household_id;
-          } else if (!updatedProfile?.household_id) {
-            setError('Kunde inte skapa hushåll för användaren');
-            setLoading(false);
-            return;
-          } else {
-            // Allt gick bra, uppdatera profilen
-            profile.household_id = updatedProfile.household_id;
-            setError(null);
+          if (householdData) {
+            profile.household_id = householdData.household_id;
           }
         }
-
-        // Säkerställ att household_id finns innan vi fortsätter
+        
+        // Hämta medlemmar i hushållet från den centrala funktionen
         if (!profile.household_id) {
-          setError('Användaren har fortfarande inget hushåll - kan inte fortsätta');
+          console.error('Inget hushåll att hämta medlemmar från');
+          setError('Inget hushåll att hämta medlemmar från');
           setLoading(false);
           return;
         }
-
-        // Hämta alla medlemmar i hushållet
+        
         const { data: membersData, error: membersError } = await getHouseholdMembers(profile.household_id);
         
         if (membersError) {
@@ -93,6 +108,9 @@ export default function RewardsPage() {
         } else if (membersData) {
           setMembers(membersData);
           console.log('Hämtade hushållsmedlemmar:', membersData.length);
+        } else {
+          console.log('Inga hushållsmedlemmar hittades');
+          setMembers([]);
         }
         
         // Hämta belöningar för hushållet
@@ -109,18 +127,26 @@ export default function RewardsPage() {
         }
         
         // Hämta antal inlösta belöningar för statistik
-        const { count, error: countError } = await supabase
-          .from('redeemed_rewards')
-          .select('id', { count: 'exact' })
-          .in('user_id', membersData?.map((m: Member) => m.id) || []);
-          
-        if (countError) {
-          console.error('Fel vid hämtning av inlösta belöningar:', countError);
-          setError(`Fel vid hämtning av inlösta belöningar: ${countError.message || 'Okänt fel'}`);
-        } else if (count !== null) {
-          setRedeemedCount(count);
+        if (membersData && membersData.length > 0) {
+          try {
+            const { count, error: countError } = await supabase
+              .from('redeemed_rewards')
+              .select('id', { count: 'exact' })
+              .in('user_id', membersData.map((m: Member) => m.id));
+              
+            if (countError) {
+              console.error('Fel vid hämtning av inlösta belöningar:', countError);
+              setError(`Fel vid hämtning av inlösta belöningar: ${countError.message || 'Okänt fel'}`);
+            } else if (count !== null) {
+              setRedeemedCount(count);
+            }
+          } catch (err) {
+            console.error('Fel vid statistikberäkning för belöningar:', err);
+          }
+        } else {
+          setRedeemedCount(0);
         }
-      } catch (err: Error | unknown) {
+      } catch (err: any) {
         console.error('Oväntat fel vid datahämtning:', err);
         setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
@@ -169,13 +195,58 @@ export default function RewardsPage() {
       );
       
       setRedeemedCount(prev => prev + 1);
-    } catch (err: Error | unknown) {
+    } catch (err: any) {
       console.error('Oväntat fel vid inlösning:', err);
     }
     
     setIsModalOpen(false);
     setSelectedReward(null);
     setSelectedMember(null);
+  };
+
+  // Funktion för att lägga till en belöning
+  const handleAddReward = async () => {
+    if (!newReward.title || !newReward.points_cost || !profile?.household_id) {
+      return; // Validera att obligatoriska fält är ifyllda
+    }
+
+    try {
+      // Skapa belöning i databasen
+      const { data: insertData, error: insertError } = await supabase
+        .from('rewards')
+        .insert({
+          title: newReward.title,
+          description: newReward.description || null,
+          points_cost: newReward.points_cost,
+          image: newReward.image || null,
+          household_id: profile.household_id
+        })
+        .select()
+        .single();
+      
+      if (insertError) {
+        console.error('Fel vid tillägg av belöning:', insertError);
+        setError(`Fel vid tillägg av belöning: ${insertError.message || 'Okänt fel'}`);
+        return;
+      }
+      
+      if (insertData) {
+        // Lägg till belöningen i lokalt state
+        setRewards([...rewards, insertData]);
+      }
+      
+      // Återställ formuläret och stäng modalen
+      setIsCreateModalOpen(false);
+      setNewReward({
+        title: '',
+        description: '',
+        points_cost: 100,
+        image: '🎁'
+      });
+    } catch (err: any) {
+      console.error('Oväntat fel vid skapande av belöning:', err);
+      setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
+    }
   };
 
   // Visa laddningsindikator när data hämtas
@@ -192,9 +263,17 @@ export default function RewardsPage() {
   return (
     <Sidebar>
       <div className="p-6">
-        <header className="mb-8">
-          <h1 className="text-3xl font-bold">Belöningar</h1>
-          <p className="text-gray-600 dark:text-gray-400 mt-2">Lös in dina poäng mot roliga belöningar</p>
+        <header className="mb-8 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold">Belöningar</h1>
+            <p className="text-gray-600 dark:text-gray-400 mt-2">Lös in dina poäng mot roliga belöningar</p>
+          </div>
+          <button 
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={() => setIsCreateModalOpen(true)}
+          >
+            + Lägg till belöning
+          </button>
         </header>
 
         {error && (
@@ -260,11 +339,7 @@ export default function RewardsPage() {
                 <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg text-center">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Främsta deltagare</h3>
                   <p className="text-2xl font-bold mt-2">
-                    {members.length > 0 
-                      ? (members.reduce((top, member) => 
-                          member.points > top.points ? member : top
-                        , members[0]).full_name || members[0].email)
-                      : '-'}
+                    {getTopMemberName()}
                   </p>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg text-center">
@@ -277,8 +352,14 @@ export default function RewardsPage() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
-          <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+          <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
             <h2 className="text-xl font-semibold">Tillgängliga belöningar</h2>
+            <button 
+              className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium"
+              onClick={() => setIsCreateModalOpen(true)}
+            >
+              + Lägg till ny
+            </button>
           </div>
           <div className="p-6">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -292,7 +373,7 @@ export default function RewardsPage() {
                   }}
                 >
                   <div className="bg-blue-100 dark:bg-blue-900/30 p-6 flex items-center justify-center text-5xl">
-                    {reward.image}
+                    {reward.image || '🎁'}
                   </div>
                   <div className="p-4">
                     <h3 className="font-semibold">{reward.title}</h3>
@@ -310,7 +391,13 @@ export default function RewardsPage() {
               ))}
               {rewards.length === 0 && (
                 <div className="col-span-full text-center text-gray-500 py-8">
-                  Inga belöningar tillagda
+                  <p>Inga belöningar tillagda</p>
+                  <button
+                    onClick={() => setIsCreateModalOpen(true)}
+                    className="mt-4 py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Skapa din första belöning
+                  </button>
                 </div>
               )}
             </div>
@@ -318,6 +405,7 @@ export default function RewardsPage() {
         </div>
       </div>
 
+      {/* Modal för att lösa in belöning */}
       {isModalOpen && selectedReward && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full">
@@ -326,7 +414,7 @@ export default function RewardsPage() {
               
               <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg mb-6">
                 <div className="text-center mb-4">
-                  <span className="text-5xl">{selectedReward.image}</span>
+                  <span className="text-5xl">{selectedReward.image || '🎁'}</span>
                 </div>
                 <h3 className="font-semibold text-lg">{selectedReward.title}</h3>
                 <p className="text-gray-600 dark:text-gray-400 mt-2">{selectedReward.description}</p>
@@ -338,11 +426,10 @@ export default function RewardsPage() {
               </div>
               
               <div className="mb-6">
-                <label htmlFor="member" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Välj vem som löser in belöningen
                 </label>
-                <select
-                  id="member"
+                <select 
                   value={selectedMember || ''}
                   onChange={(e) => setSelectedMember(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-900 dark:text-white"
@@ -355,10 +442,21 @@ export default function RewardsPage() {
                       disabled={member.points < selectedReward.points_cost}
                     >
                       {member.full_name || member.email} ({member.points} poäng)
-                      {member.points < selectedReward.points_cost ? ' - Inte tillräckligt med poäng' : ''}
                     </option>
                   ))}
                 </select>
+                
+                {selectedMember && (() => {
+                  const member = members.find(m => m.id === selectedMember);
+                  if (member && member.points < selectedReward.points_cost) {
+                    return (
+                      <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                        Denna person har inte tillräckligt med poäng för att lösa in belöningen.
+                      </p>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
               
               <div className="flex gap-3 justify-end">
@@ -374,10 +472,116 @@ export default function RewardsPage() {
                 </button>
                 <button
                   onClick={handleRedeemReward}
-                  disabled={!selectedMember || (selectedMember && members.find(m => m.id === selectedMember)?.points || 0) < selectedReward.points_cost}
+                  disabled={!selectedMember || (() => {
+                    const member = members.find(m => m.id === selectedMember);
+                    return !member || member.points < selectedReward.points_cost;
+                  })()}
                   className="py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Lös in belöning
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal för att lägga till ny belöning */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full">
+            <div className="p-6">
+              <h2 className="text-xl font-semibold mb-4">Skapa ny belöning</h2>
+              
+              <div className="space-y-4">
+                <div>
+                  <label htmlFor="title" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Titel *
+                  </label>
+                  <input
+                    id="title"
+                    type="text"
+                    value={newReward.title}
+                    onChange={(e) => setNewReward({...newReward, title: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-900 dark:text-white"
+                    placeholder="Titel på belöningen"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Beskrivning
+                  </label>
+                  <textarea
+                    id="description"
+                    value={newReward.description}
+                    onChange={(e) => setNewReward({...newReward, description: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-900 dark:text-white"
+                    placeholder="Beskriv belöningen"
+                    rows={3}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="points_cost" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Poängkostnad *
+                  </label>
+                  <input
+                    id="points_cost"
+                    type="number"
+                    min="1"
+                    max="1000"
+                    value={newReward.points_cost}
+                    onChange={(e) => setNewReward({...newReward, points_cost: parseInt(e.target.value) || 100})}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-900 dark:text-white"
+                    required
+                  />
+                </div>
+                
+                <div>
+                  <label htmlFor="image" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Ikon
+                  </label>
+                  <div className="grid grid-cols-5 gap-2 mb-2">
+                    {rewardIcons.map(icon => (
+                      <div 
+                        key={icon}
+                        onClick={() => setNewReward({...newReward, image: icon})}
+                        className={`h-12 w-12 flex items-center justify-center text-2xl rounded-lg border cursor-pointer ${
+                          newReward.image === icon 
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' 
+                            : 'border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900/50'
+                        }`}
+                      >
+                        {icon}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              <div className="mt-6 flex gap-3 justify-end">
+                <button
+                  onClick={() => {
+                    setIsCreateModalOpen(false);
+                    setNewReward({
+                      title: '',
+                      description: '',
+                      points_cost: 100,
+                      image: '🎁'
+                    });
+                  }}
+                  className="py-2 px-4 bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-200 font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                >
+                  Avbryt
+                </button>
+                <button
+                  onClick={handleAddReward}
+                  disabled={!newReward.title || !newReward.points_cost}
+                  className="py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Skapa belöning
                 </button>
               </div>
             </div>

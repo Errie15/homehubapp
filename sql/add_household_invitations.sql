@@ -40,9 +40,3 @@ CREATE POLICY "Användare kan uppdatera status för inbjudningar de har fått"
     to_email = (SELECT email FROM profiles WHERE id = auth.uid())
   );
 
--- För administratören (om detta behövs)
-CREATE POLICY "Admin kan hantera alla inbjudningar"
-  ON household_invitations
-  USING (
-    (SELECT role FROM profiles WHERE id = auth.uid()) = 'Admin'
-  ); 

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
 import { getHouseholdTasks, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/lib/supabase';
 
 // Definiera typer för data från Supabase
 type Task = {
@@ -135,6 +136,79 @@ export default function DashboardPage() {
   const completedTasksCount = tasks.filter(task => task.completed).length;
   const completionRate = tasks.length > 0 ? (completedTasksCount / tasks.length) * 100 : 0;
 
+  const handleCompleteTask = async (taskId: string) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task || task.completed) return;
+      
+      // Uppdatera uppgiften i databasen
+      const { error } = await supabase
+        .from('tasks')
+        .update({ completed: true })
+        .eq('id', taskId);
+      
+      if (error) {
+        console.error('Fel vid uppdatering av uppgift:', error);
+        return;
+      }
+      
+      // Om uppgiften har en tilldelad användare, tilldela poäng
+      if (task.assigned_to) {
+        // Hämta användarens nuvarande poäng
+        const { data: userData, error: userError } = await supabase
+          .from('profiles')
+          .select('points')
+          .eq('id', task.assigned_to)
+          .single();
+          
+        if (userError) {
+          console.error('Fel vid hämtning av användardata:', userError);
+        } else if (userData) {
+          // Beräkna nya poäng och uppdatera användarens profil
+          const newPoints = (userData.points || 0) + task.points;
+          
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ points: newPoints })
+            .eq('id', task.assigned_to);
+            
+          if (updateError) {
+            console.error('Fel vid uppdatering av poäng:', updateError);
+          } else {
+            console.log(`Tilldelade ${task.points} poäng till användare ${task.assigned_to}`);
+            
+            // Uppdatera medlemslistan med nya poäng
+            setMembers(prev => 
+              prev.map(member => 
+                member.id === task.assigned_to 
+                  ? { ...member, points: newPoints, completed_tasks: member.completed_tasks + 1 }
+                  : member
+              )
+            );
+            
+            // Uppdatera householdPoints
+            const memberName = members.find(m => m.id === task.assigned_to)?.full_name || 
+                               members.find(m => m.id === task.assigned_to)?.email || '';
+            
+            if (memberName) {
+              setHouseholdPoints(prev => ({
+                ...prev,
+                [memberName]: (prev[memberName] || 0) + task.points
+              }));
+            }
+          }
+        }
+      }
+      
+      // Uppdatera lokalt state för tasks
+      setTasks(prev => 
+        prev.map(t => t.id === taskId ? { ...t, completed: true } : t)
+      );
+    } catch (err: Error | unknown) {
+      console.error('Oväntat fel vid uppdatering av uppgift:', err);
+    }
+  };
+
   // Visa laddningsindikator när data hämtas
   if (loading) {
     return (
@@ -244,7 +318,7 @@ export default function DashboardPage() {
                     <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
                       {task.points} poäng
                     </span>
-                    <button className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                    <button className="p-2 rounded-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors" onClick={() => handleCompleteTask(task.id)}>
                       ✓
                     </button>
                   </div>

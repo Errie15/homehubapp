@@ -25,6 +25,7 @@ type Profile = {
   email: string;
   avatar_url?: string;
   role?: string;
+  points?: number;
 };
 
 export default function TasksPage() {
@@ -214,10 +215,12 @@ export default function TasksPage() {
       const task = tasks.find(t => t.id === id);
       if (!task) return;
       
+      const newCompletedState = !task.completed;
+      
       // Uppdatera uppgiften i databasen
       const { error } = await supabase
         .from('tasks')
-        .update({ completed: !task.completed })
+        .update({ completed: newCompletedState })
         .eq('id', id);
       
       if (error) {
@@ -225,10 +228,47 @@ export default function TasksPage() {
         return;
       }
       
+      // Om uppgiften är slutförd, tilldela poäng till användaren
+      if (newCompletedState && task.assigned_to) {
+        // Hämta användarens nuvarande poäng
+        const { data: userData, error: userError } = await supabase
+          .from('profiles')
+          .select('points')
+          .eq('id', task.assigned_to)
+          .single();
+          
+        if (userError) {
+          console.error('Fel vid hämtning av användardata:', userError);
+        } else if (userData) {
+          // Beräkna nya poäng och uppdatera användarens profil
+          const newPoints = (userData.points || 0) + task.points;
+          
+          const { error: updateError } = await supabase
+            .from('profiles')
+            .update({ points: newPoints })
+            .eq('id', task.assigned_to);
+            
+          if (updateError) {
+            console.error('Fel vid uppdatering av poäng:', updateError);
+          } else {
+            console.log(`Tilldelade ${task.points} poäng till användare ${task.assigned_to}`);
+            
+            // Uppdatera medlemslistan med nya poäng om användaren finns i listan
+            setMembers(
+              members.map(member => 
+                member.id === task.assigned_to 
+                  ? { ...member, points: newPoints }
+                  : member
+              )
+            );
+          }
+        }
+      }
+      
       // Uppdatera lokalt state
       setTasks(
-        tasks.map(task => 
-          task.id === id ? { ...task, completed: !task.completed } : task
+        tasks.map(t => 
+          t.id === id ? { ...t, completed: newCompletedState } : t
         )
       );
     } catch (err: Error | unknown) {
