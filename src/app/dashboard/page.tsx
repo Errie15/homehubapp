@@ -1,24 +1,150 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
+import { supabase, getHouseholdTasks, getUserProfile, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
+import { useAuth } from '@/hooks/useAuth';
+
+// Definiera typer för data från Supabase
+type Task = {
+  id: string;
+  title: string;
+  description?: string;
+  assigned_to?: string;
+  due_date?: string;
+  points: number;
+  completed: boolean;
+  category?: string;
+};
+
+type HouseholdMember = {
+  id: string;
+  full_name: string;
+  name: string; // För kompatibilitet
+  email: string;
+  points: number;
+  completed_tasks: number;
+  avatar_url?: string;
+  role?: string;
+};
 
 export default function DashboardPage() {
-  // Demo-data för att visualisera dashboarden
-  const [tasks] = useState([
-    { id: 1, title: 'Diska', assignedTo: 'Anna', dueDate: '2023-03-30', completed: false, points: 10 },
-    { id: 2, title: 'Dammsuga', assignedTo: 'Erik', dueDate: '2023-03-31', completed: true, points: 15 },
-    { id: 3, title: 'Handla mat', assignedTo: 'Anna', dueDate: '2023-04-01', completed: false, points: 20 },
-    { id: 4, title: 'Tvätta', assignedTo: 'Erik', dueDate: '2023-04-02', completed: false, points: 25 },
-  ]);
+  const { user, profile } = useAuth();
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [householdPoints, setHouseholdPoints] = useState<Record<string, number>>({});
+  const [members, setMembers] = useState<HouseholdMember[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const [householdPoints] = useState({
-    'Anna': 80,
-    'Erik': 75
-  });
+  useEffect(() => {
+    async function fetchData() {
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+      
+      try {
+        // Om användaren inte har ett hushåll, försök skapa ett
+        if (!profile.household_id) {
+          setError('Användaren saknar hushåll. Försöker skapa ett...');
+          
+          // Försök skapa ett hushåll och uppdatera profilen
+          const { data: updatedProfile, error: householdError } = await ensureUserHasHousehold(
+            profile.id, 
+            profile
+          );
+          
+          // Även om det finns ett fel, kontrollera om vi fick ett hushålls-ID tillbaka
+          // Detta händer när hushållet skapades men profilen inte kunde uppdateras i databasen
+          const hasHouseholdId = updatedProfile?.household_id || false;
+          
+          if (householdError && !hasHouseholdId) {
+            setError(`Kunde inte skapa hushåll: ${householdError.message || 'Okänt fel'}`);
+            setLoading(false);
+            return;
+          } else if (householdError && hasHouseholdId) {
+            // Hushållet skapades men kunde inte länkas permanent till profilen
+            // Vi kan fortfarande använda det för denna session
+            setError('Hushåll skapades, men kunde inte länkas permanent till profilen. Sessionen fortsätter temporärt.');
+            profile.household_id = updatedProfile.household_id;
+          } else if (!updatedProfile?.household_id) {
+            setError('Kunde inte skapa hushåll för användaren');
+            setLoading(false);
+            return;
+          } else {
+            // Allt gick bra, uppdatera profilen
+            profile.household_id = updatedProfile.household_id;
+            setError(null);
+          }
+        }
 
+        // Säkerställ att household_id finns innan vi fortsätter
+        if (!profile.household_id) {
+          setError('Användaren har fortfarande inget hushåll - kan inte fortsätta');
+          setLoading(false);
+          return;
+        }
+
+        // Hämta uppgifter för hushållet
+        const { data: tasksData, error: tasksError } = await getHouseholdTasks(profile.household_id);
+        
+        if (tasksError) {
+          console.error('Fel vid hämtning av uppgifter:', tasksError);
+          setError(`Fel vid hämtning av uppgifter: ${tasksError.message || 'Okänt fel'}`);
+        } else if (tasksData) {
+          setTasks(tasksData as Task[]);
+        }
+        
+        // Hämta alla medlemmar i hushållet för att få poängen
+        const { data: members, error: membersError } = await getHouseholdMembers(profile.household_id);
+          
+        if (membersError) {
+          console.error('Fel vid hämtning av medlemmar:', membersError);
+          setError(`Fel vid hämtning av medlemmar: ${membersError.message || 'Okänt fel'}`);
+        } else if (members) {
+          // Om vi hade några medlemmar men listan är tom, fortsätt ändå
+          if (members.length === 0) {
+            console.log('Inga hushållsmedlemmar hittades, använder endast aktuell användare');
+            // Skapa ett punktobjekt bara för den aktuella användaren
+            const pointsObj: Record<string, number> = {};
+            pointsObj[profile.full_name || profile.email || 'Du'] = profile.points || 0;
+            setHouseholdPoints(pointsObj);
+            setMembers([]);
+          } else {
+            // Skapa objekt med användarnamn och poäng
+            const pointsObj: Record<string, number> = {};
+            members.forEach((member: HouseholdMember) => {
+              pointsObj[member.full_name || member.email] = member.points || 0;
+            });
+            setHouseholdPoints(pointsObj);
+            setMembers(members);
+            console.log('Hämtade hushållsmedlemmar:', members.length);
+          }
+        }
+      } catch (err: any) {
+        console.error('Oväntat fel vid datahämtning:', err);
+        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchData();
+  }, [profile]);
+  
   const completedTasksCount = tasks.filter(task => task.completed).length;
-  const completionRate = (completedTasksCount / tasks.length) * 100;
+  const completionRate = tasks.length > 0 ? (completedTasksCount / tasks.length) * 100 : 0;
+
+  // Visa laddningsindikator när data hämtas
+  if (loading) {
+    return (
+      <Sidebar>
+        <div className="p-6 flex justify-center items-center h-full">
+          <p>Laddar data...</p>
+        </div>
+      </Sidebar>
+    );
+  }
 
   return (
     <Sidebar>
@@ -27,6 +153,13 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold">Välkommen tillbaka!</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">Här är en översikt över vad som händer i ditt hushåll</p>
         </header>
+
+        {error && (
+          <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-100 dark:border-yellow-800">
+            <h2 className="font-medium mb-2 text-yellow-800 dark:text-yellow-400">Varning</h2>
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">{error}</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
@@ -45,29 +178,45 @@ export default function DashboardPage() {
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
             <h2 className="text-xl font-semibold mb-2">Poäng</h2>
-            <div className="space-y-4">
-              {Object.entries(householdPoints).map(([name, points]) => (
-                <div key={name}>
-                  <div className="flex justify-between mb-1">
-                    <span>{name}</span>
-                    <span className="font-semibold">{points} poäng</span>
+            {Object.keys(householdPoints).length > 0 ? (
+              <div className="space-y-4">
+                {Object.entries(householdPoints).map(([name, points]) => (
+                  <div key={name}>
+                    <div className="flex justify-between mb-1">
+                      <span>{name}</span>
+                      <span className="font-semibold">{points} poäng</span>
+                    </div>
+                    <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-blue-500" 
+                        style={{ width: `${Math.min(100, (points / 100) * 100)}%` }}
+                      ></div>
+                    </div>
                   </div>
-                  <div className="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-blue-500" 
-                      style={{ width: `${(points / 100) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">Inga poäng att visa än</p>
+            )}
           </div>
 
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6">
             <h2 className="text-xl font-semibold mb-2">Kommande</h2>
             <div className="text-4xl mb-2">📅</div>
             <p className="text-gray-600 dark:text-gray-400">Nästa evenemang:</p>
-            <p className="font-medium">Storstädning på lördag</p>
+            {profile?.household_id ? (
+              <p className="font-medium">
+                {tasks.filter(task => !task.completed)
+                  .sort((a, b) => {
+                    if (!a.due_date && !b.due_date) return 0;
+                    if (!a.due_date) return 1;
+                    if (!b.due_date) return -1;
+                    return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
+                  })[0]?.title || "Inga kommande händelser"}
+              </p>
+            ) : (
+              <p className="font-medium">Inga kommande händelser</p>
+            )}
           </div>
         </div>
 
@@ -82,10 +231,16 @@ export default function DashboardPage() {
                 <div key={task.id} className="p-4 flex items-center justify-between">
                   <div>
                     <h3 className="font-medium">{task.title}</h3>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">Tilldelad: {task.assignedTo}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Tilldelad: {householdPoints && Object.keys(householdPoints).find(name => 
+                        members?.find(member => 
+                          (member.id === task.assigned_to) && (member.full_name === name || member.email === name)
+                        )
+                      ) || (task.assigned_to ? 'Okänd användare' : 'Ingen')}
+                    </p>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-sm text-gray-600 dark:text-gray-400">{task.dueDate}</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400">{task.due_date}</span>
                     <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
                       {task.points} poäng
                     </span>
@@ -95,6 +250,11 @@ export default function DashboardPage() {
                   </div>
                 </div>
               ))}
+              {tasks.filter(task => !task.completed).length === 0 && (
+                <div className="p-4 text-center text-gray-500">
+                  Inga kommande uppgifter
+                </div>
+              )}
           </div>
         </div>
       </div>

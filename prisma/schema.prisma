@@ -1,0 +1,78 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  image         String?
+  role          String?   @default("user")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  
+  // Relationer
+  profile       Profile?
+  household     Household? @relation(fields: [householdId], references: [id])
+  householdId   String?
+  tasks         Task[]
+  
+  @@map("users")
+}
+
+model Profile {
+  id                   String   @id
+  user                 User     @relation(fields: [id], references: [id], onDelete: Cascade)
+  full_name            String?
+  avatar_url           String?
+  role                 String?  @default("Användare")
+  points               Int      @default(0)
+  completed_tasks      Int      @default(0)
+  notifications_enabled Boolean  @default(true)
+  theme                String?  @default("light")
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+model Household {
+  id          String   @id @default(cuid())
+  name        String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relationer
+  users       User[]
+  tasks       Task[]
+  
+  @@map("households")
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("pending")
+  dueDate     DateTime?
+  points      Int      @default(10)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // Relationer
+  user        User?    @relation(fields: [userId], references: [id])
+  userId      String?
+  household   Household? @relation(fields: [householdId], references: [id])
+  householdId String?
+  
+  @@map("tasks")
+}
+
+// Den här filen kan användas för att migrera datan från Supabase
+// till ett mer strukturerat schema i framtiden om det behövs. 

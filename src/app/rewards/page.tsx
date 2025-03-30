@@ -1,94 +1,193 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
+import { supabase, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
+import { useAuth } from '@/hooks/useAuth';
 
 type Member = {
-  id: number;
-  name: string;
+  id: string;
+  full_name?: string;
+  name?: string; // För kompatibilitet
+  email: string;
   points: number;
-  avatar: string;
+  avatar_url?: string;
+  role?: string;
 };
 
 type Reward = {
-  id: number;
+  id: string;
   title: string;
   description: string;
-  pointsCost: number;
+  points_cost: number;
   image: string;
+  household_id: string;
 };
 
 export default function RewardsPage() {
-  const [members, setMembers] = useState<Member[]>([
-    { id: 1, name: 'Anna', points: 120, avatar: '👩' },
-    { id: 2, name: 'Erik', points: 85, avatar: '👨' },
-    { id: 3, name: 'Olivia', points: 65, avatar: '👧' },
-    { id: 4, name: 'Johan', points: 95, avatar: '👦' },
-  ]);
-
-  const [rewards] = useState<Reward[]>([
-    { 
-      id: 1, 
-      title: 'Välj fredagsmys', 
-      description: 'Bestäm vad ni ska äta och titta på under fredagskvällen', 
-      pointsCost: 50,
-      image: '🍕'
-    },
-    { 
-      id: 2, 
-      title: 'Sovmorgon', 
-      description: 'Slipp morgonsysslorna en helgdag', 
-      pointsCost: 75,
-      image: '😴'
-    },
-    { 
-      id: 3, 
-      title: 'Restaurangbesök', 
-      description: 'Middag ute på valfri restaurang', 
-      pointsCost: 150,
-      image: '🍽️'
-    },
-    { 
-      id: 4, 
-      title: 'Fri från disken', 
-      description: 'Slipp diska i en vecka', 
-      pointsCost: 100,
-      image: '🧼'
-    },
-    { 
-      id: 5, 
-      title: 'En önskning', 
-      description: 'Välj en aktivitet som hela hushållet ska göra tillsammans', 
-      pointsCost: 200,
-      image: '✨'
-    },
-  ]);
-
+  const { user, profile } = useAuth();
+  const [members, setMembers] = useState<Member[]>([]);
+  const [rewards, setRewards] = useState<Reward[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedReward, setSelectedReward] = useState<Reward | null>(null);
-  const [selectedMember, setSelectedMember] = useState<number | null>(null);
+  const [selectedMember, setSelectedMember] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [redeemedCount, setRedeemedCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleRedeemReward = () => {
-    if (!selectedReward || selectedMember === null) return;
+  useEffect(() => {
+    async function fetchData() {
+      if (!profile) {
+        setLoading(false);
+        return;
+      }
+      
+      try {
+        // Om användaren inte har ett hushåll, försök skapa ett
+        if (!profile.household_id) {
+          setError('Användaren saknar hushåll. Försöker skapa ett...');
+          
+          // Försök skapa ett hushåll och uppdatera profilen
+          const { data: updatedProfile, error: householdError } = await ensureUserHasHousehold(
+            profile.id, 
+            profile
+          );
+          
+          // Även om det finns ett fel, kontrollera om vi fick ett hushålls-ID tillbaka
+          // Detta händer när hushållet skapades men profilen inte kunde uppdateras i databasen
+          const hasHouseholdId = updatedProfile?.household_id || false;
+          
+          if (householdError && !hasHouseholdId) {
+            setError(`Kunde inte skapa hushåll: ${householdError.message || 'Okänt fel'}`);
+            setLoading(false);
+            return;
+          } else if (householdError && hasHouseholdId) {
+            // Hushållet skapades men kunde inte länkas permanent till profilen
+            // Vi kan fortfarande använda det för denna session
+            setError('Hushåll skapades, men kunde inte länkas permanent till profilen. Sessionen fortsätter temporärt.');
+            profile.household_id = updatedProfile.household_id;
+          } else if (!updatedProfile?.household_id) {
+            setError('Kunde inte skapa hushåll för användaren');
+            setLoading(false);
+            return;
+          } else {
+            // Allt gick bra, uppdatera profilen
+            profile.household_id = updatedProfile.household_id;
+            setError(null);
+          }
+        }
+
+        // Säkerställ att household_id finns innan vi fortsätter
+        if (!profile.household_id) {
+          setError('Användaren har fortfarande inget hushåll - kan inte fortsätta');
+          setLoading(false);
+          return;
+        }
+
+        // Hämta alla medlemmar i hushållet
+        const { data: membersData, error: membersError } = await getHouseholdMembers(profile.household_id);
+        
+        if (membersError) {
+          console.error('Fel vid hämtning av medlemmar:', membersError);
+          setError(`Fel vid hämtning av medlemmar: ${membersError.message || 'Okänt fel'}`);
+        } else if (membersData) {
+          setMembers(membersData);
+          console.log('Hämtade hushållsmedlemmar:', membersData.length);
+        }
+        
+        // Hämta belöningar för hushållet
+        const { data: rewardsData, error: rewardsError } = await supabase
+          .from('rewards')
+          .select('*')
+          .eq('household_id', profile.household_id);
+          
+        if (rewardsError) {
+          console.error('Fel vid hämtning av belöningar:', rewardsError);
+          setError(`Fel vid hämtning av belöningar: ${rewardsError.message || 'Okänt fel'}`);
+        } else if (rewardsData) {
+          setRewards(rewardsData);
+        }
+        
+        // Hämta antal inlösta belöningar för statistik
+        const { count, error: countError } = await supabase
+          .from('redeemed_rewards')
+          .select('id', { count: 'exact' })
+          .in('user_id', membersData?.map(m => m.id) || []);
+          
+        if (countError) {
+          console.error('Fel vid hämtning av inlösta belöningar:', countError);
+          setError(`Fel vid hämtning av inlösta belöningar: ${countError.message || 'Okänt fel'}`);
+        } else if (count !== null) {
+          setRedeemedCount(count);
+        }
+      } catch (err: any) {
+        console.error('Oväntat fel vid datahämtning:', err);
+        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+    
+    fetchData();
+  }, [profile]);
+
+  const handleRedeemReward = async () => {
+    if (!selectedReward || !selectedMember) return;
     
     const member = members.find(m => m.id === selectedMember);
-    if (!member || member.points < selectedReward.pointsCost) return;
+    if (!member || member.points < selectedReward.points_cost) return;
     
-    // Uppdatera poäng för den valda medlemmen
-    setMembers(
-      members.map(m => 
-        m.id === selectedMember 
-          ? { ...m, points: m.points - selectedReward.pointsCost } 
-          : m
-      )
-    );
+    try {
+      // Minska poäng för medlemmen
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ points: member.points - selectedReward.points_cost })
+        .eq('id', selectedMember);
+        
+      if (updateError) {
+        console.error('Fel vid uppdatering av poäng:', updateError);
+        return;
+      }
+      
+      // Registrera inlöst belöning
+      const { error: insertError } = await supabase
+        .from('redeemed_rewards')
+        .insert({ reward_id: selectedReward.id, user_id: selectedMember });
+        
+      if (insertError) {
+        console.error('Fel vid registrering av inlöst belöning:', insertError);
+        return;
+      }
+      
+      // Uppdatera lokal data
+      setMembers(
+        members.map(m => 
+          m.id === selectedMember 
+            ? { ...m, points: m.points - selectedReward.points_cost } 
+            : m
+        )
+      );
+      
+      setRedeemedCount(prev => prev + 1);
+    } catch (err) {
+      console.error('Oväntat fel vid inlösning:', err);
+    }
     
     setIsModalOpen(false);
     setSelectedReward(null);
     setSelectedMember(null);
-    
-    // Här skulle man kunna visa en bekräftelse eller historik över inlösta belöningar
   };
+
+  // Visa laddningsindikator när data hämtas
+  if (loading) {
+    return (
+      <Sidebar>
+        <div className="p-6 flex justify-center items-center h-full">
+          <p>Laddar data...</p>
+        </div>
+      </Sidebar>
+    );
+  }
 
   return (
     <Sidebar>
@@ -97,6 +196,13 @@ export default function RewardsPage() {
           <h1 className="text-3xl font-bold">Belöningar</h1>
           <p className="text-gray-600 dark:text-gray-400 mt-2">Lös in dina poäng mot roliga belöningar</p>
         </header>
+
+        {error && (
+          <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-100 dark:border-yellow-800">
+            <h2 className="font-medium mb-2 text-yellow-800 dark:text-yellow-400">Varning</h2>
+            <p className="text-sm text-yellow-600 dark:text-yellow-400">{error}</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md overflow-hidden">
@@ -107,10 +213,10 @@ export default function RewardsPage() {
               {members.map(member => (
                 <div key={member.id} className="flex items-center">
                   <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900 rounded-full flex items-center justify-center text-xl">
-                    {member.avatar}
+                    {member.avatar_url || (member.full_name?.[0] || member.email[0])}
                   </div>
                   <div className="ml-4 flex-1">
-                    <h3 className="font-medium">{member.name}</h3>
+                    <h3 className="font-medium">{member.full_name || member.email}</h3>
                     <div className="mt-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-blue-500" 
@@ -123,6 +229,11 @@ export default function RewardsPage() {
                   </div>
                 </div>
               ))}
+              {members.length === 0 && (
+                <div className="text-center text-gray-500">
+                  Inga medlemmar tillagda
+                </div>
+              )}
             </div>
           </div>
           
@@ -141,20 +252,24 @@ export default function RewardsPage() {
                 <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg text-center">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Genomsnittliga poäng</h3>
                   <p className="text-2xl font-bold mt-2">
-                    {Math.round(members.reduce((sum, member) => sum + member.points, 0) / members.length)}
+                    {members.length > 0 
+                      ? Math.round(members.reduce((sum, member) => sum + member.points, 0) / members.length) 
+                      : 0}
                   </p>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg text-center">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Främsta deltagare</h3>
                   <p className="text-2xl font-bold mt-2">
-                    {members.reduce((top, member) => 
-                      member.points > top.points ? member : top
-                    , members[0]).name}
+                    {members.length > 0 
+                      ? (members.reduce((top, member) => 
+                          member.points > top.points ? member : top
+                        , members[0]).full_name || members[0].email)
+                      : '-'}
                   </p>
                 </div>
                 <div className="bg-gray-50 dark:bg-gray-900 p-4 rounded-lg text-center">
                   <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Inlösta belöningar</h3>
-                  <p className="text-2xl font-bold mt-2">12</p>
+                  <p className="text-2xl font-bold mt-2">{redeemedCount}</p>
                 </div>
               </div>
             </div>
@@ -184,7 +299,7 @@ export default function RewardsPage() {
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{reward.description}</p>
                     <div className="mt-3 flex justify-between items-center">
                       <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                        {reward.pointsCost} poäng
+                        {reward.points_cost} poäng
                       </span>
                       <button className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium">
                         Lös in
@@ -193,6 +308,11 @@ export default function RewardsPage() {
                   </div>
                 </div>
               ))}
+              {rewards.length === 0 && (
+                <div className="col-span-full text-center text-gray-500 py-8">
+                  Inga belöningar tillagda
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -212,7 +332,7 @@ export default function RewardsPage() {
                 <p className="text-gray-600 dark:text-gray-400 mt-2">{selectedReward.description}</p>
                 <div className="mt-3 text-center">
                   <span className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300 text-sm font-medium px-3 py-1 rounded-full">
-                    {selectedReward.pointsCost} poäng
+                    {selectedReward.points_cost} poäng
                   </span>
                 </div>
               </div>
@@ -224,7 +344,7 @@ export default function RewardsPage() {
                 <select
                   id="member"
                   value={selectedMember || ''}
-                  onChange={(e) => setSelectedMember(parseInt(e.target.value))}
+                  onChange={(e) => setSelectedMember(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-900 dark:text-white"
                 >
                   <option value="">Välj person</option>
@@ -232,10 +352,10 @@ export default function RewardsPage() {
                     <option 
                       key={member.id} 
                       value={member.id}
-                      disabled={member.points < selectedReward.pointsCost}
+                      disabled={member.points < selectedReward.points_cost}
                     >
-                      {member.name} ({member.points} poäng)
-                      {member.points < selectedReward.pointsCost ? ' - Inte tillräckligt med poäng' : ''}
+                      {member.full_name || member.email} ({member.points} poäng)
+                      {member.points < selectedReward.points_cost ? ' - Inte tillräckligt med poäng' : ''}
                     </option>
                   ))}
                 </select>
@@ -254,7 +374,7 @@ export default function RewardsPage() {
                 </button>
                 <button
                   onClick={handleRedeemReward}
-                  disabled={!selectedMember || (selectedMember && members.find(m => m.id === selectedMember)?.points || 0) < selectedReward.pointsCost}
+                  disabled={!selectedMember || (selectedMember && members.find(m => m.id === selectedMember)?.points || 0) < selectedReward.points_cost}
                   className="py-2 px-4 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Lös in belöning

@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 
 export type CalendarEvent = {
-  id: number;
+  id: string | number;
   title: string;
   assignedTo: string;
   dayOfWeek: number; // 0-6 för måndag-söndag
@@ -17,7 +17,7 @@ interface CalendarViewProps {
   events: CalendarEvent[];
   onEventClick?: (event: CalendarEvent) => void;
   onAddClick?: (dayOfWeek: number) => void;
-  onDeleteEvent?: (id: number) => void;
+  onDeleteEvent?: (id: string | number) => void;
 }
 
 export default function CalendarView({ 
