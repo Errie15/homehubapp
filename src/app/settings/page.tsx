@@ -8,8 +8,8 @@ import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import { useAuth } from "@/hooks/useAuth";
-import { getHouseholdInfo, getHouseholdMembers, supabase } from "@/lib/supabase";
-import { useSearchParams } from "next/navigation";
+import { getHouseholdInfo, getHouseholdMembers, supabase, signOut, leaveHousehold, inviteUserToHousehold } from "@/lib/supabase";
+import { useSearchParams, useRouter } from "next/navigation";
 
 interface HouseholdMember {
   id: string;
@@ -36,6 +36,7 @@ function SettingsPageContent() {
   const { user, profile } = useAuth();
   const searchParams = useSearchParams();
   const sectionParam = searchParams.get("section");
+  const router = useRouter();
   
   const [settings, setSettings] = useState<HouseholdSettings>({
     householdName: "",
@@ -56,6 +57,10 @@ function SettingsPageContent() {
     email: "",
     role: "Medlem"
   });
+
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [isLeavingHousehold, setIsLeavingHousehold] = useState(false);
+  const [showLeaveConfirmModal, setShowLeaveConfirmModal] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -172,15 +177,62 @@ function SettingsPageContent() {
 
   const handleAddMember = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!profile?.household_id) return;
+    if (!profile?.household_id || !user) return;
 
     try {
-      // Här skulle vi skicka en inbjudan till den nya medlemmen
-      // För enkelhetens skull har vi bara ett meddelande
-      alert(`Inbjudan skulle skickas till ${newMember.email}`);
+      // Validera inmatning
+      if (!newMember.email.trim() || !newMember.name.trim()) {
+        alert("Vänligen fyll i både namn och e-post för den nya medlemmen");
+        return;
+      }
+      
+      // Kontrollera om medlemmen redan finns i hushållet
+      const existingMember = settings.members.find(
+        member => member.email.toLowerCase() === newMember.email.toLowerCase()
+      );
+      
+      if (existingMember) {
+        alert(`${existingMember.name} är redan medlem i hushållet`);
+        return;
+      }
+      
+      // Skapa en inbjudan till det aktuella hushållet
+      const { error } = await inviteUserToHousehold({
+        fromUserId: user.id,
+        fromUserName: profile.full_name || user.email?.split('@')[0] || 'Användare',
+        toEmail: newMember.email,
+        householdId: profile.household_id,
+        householdName: settings.householdName
+      });
+      
+      if (error) {
+        console.error("Fel vid inbjudan av ny medlem:", error);
+        
+        // Visa ett mer användarvänligt felmeddelande baserat på feltyp
+        if (error.message?.includes("inbjudningssystemet är inte konfigurerat")) {
+          alert("Inbjudningssystemet är inte konfigurerat korrekt. Kontakta administratören.");
+        } else if (error.message?.includes("duplicate key")) {
+          alert(`En inbjudan till ${newMember.email} har redan skickats.`);
+        } else {
+          alert(`Kunde inte bjuda in medlem: ${error.message || 'Okänt fel'}`);
+        }
+        return;
+      }
+      
+      // Visa bekräftelse och stäng modal
+      alert(`Inbjudan har skickats till ${newMember.email}`);
+      
+      // Återställ formuläret och stäng modalen
+      setNewMember({
+        name: "",
+        email: "",
+        role: "Medlem"
+      });
       setShowAddMemberModal(false);
     } catch (err) {
       console.error("Fel vid tillägg av ny medlem:", err);
+      const errorMessage = err instanceof Error ? err.message : "Ett oväntat fel uppstod";
+      alert(`Ett fel uppstod vid inbjudan: ${errorMessage}`);
     }
   };
 
@@ -287,6 +339,48 @@ function SettingsPageContent() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      const { error } = await signOut();
+      if (error) {
+        console.error("Fel vid utloggning:", error);
+        throw error;
+      }
+      router.push('/auth');
+    } catch (err) {
+      console.error("Fel vid utloggning:", err);
+      alert("Ett fel uppstod vid utloggning. Försök igen.");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
+  const handleLeaveHousehold = async () => {
+    if (!user?.id) return;
+    
+    try {
+      setIsLeavingHousehold(true);
+      const { error } = await leaveHousehold(user.id);
+      
+      if (error) {
+        console.error("Fel när användaren försökte lämna hushållet:", error);
+        throw error;
+      }
+      
+      // Stäng bekräftelsemodalen
+      setShowLeaveConfirmModal(false);
+      
+      // Omdirigera till profilsidan för att skapa ett nytt hushåll
+      router.push('/profile');
+    } catch (err) {
+      console.error("Fel vid lämning av hushåll:", err);
+      alert("Ett fel uppstod när du försökte lämna hushållet. Försök igen.");
+    } finally {
+      setIsLeavingHousehold(false);
+    }
+  };
+
   if (loading) {
     return (
       <Sidebar>
@@ -390,7 +484,31 @@ function SettingsPageContent() {
   return (
     <Sidebar>
       <div className="p-6">
-        <h1 className="text-3xl font-bold mb-2">Inställningar</h1>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-2xl font-semibold">Inställningar</h1>
+          {loading ? (
+            <div className="flex space-x-2">
+              <div className="bg-gray-200 dark:bg-gray-700 h-10 w-28 rounded animate-pulse"></div>
+            </div>
+          ) : (
+            <div className="flex flex-col space-y-2 sm:flex-row sm:space-y-0 sm:space-x-2">
+              <Button
+                variant="outline"
+                className="text-red-500 border-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                onClick={() => setShowLeaveConfirmModal(true)}
+              >
+                Lämna hushåll
+              </Button>
+              <Button 
+                variant="outline" 
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? "Loggar ut..." : "Logga ut"}
+              </Button>
+            </div>
+          )}
+        </div>
         <p className="text-gray-600 dark:text-gray-400 mb-6">
           Hantera ditt hushålls inställningar och medlemmar
         </p>
@@ -790,6 +908,37 @@ function SettingsPageContent() {
             </div>
           </div>
         </Modal>
+
+        {/* Modal för att bekräfta lämning av hushåll */}
+        {showLeaveConfirmModal && (
+          <Modal
+            isOpen={showLeaveConfirmModal}
+            title="Lämna hushåll"
+            onClose={() => setShowLeaveConfirmModal(false)}
+          >
+            <div className="p-4 space-y-4">
+              <p>Är du säker på att du vill lämna detta hushåll? Du kommer inte längre ha tillgång till hushållets delad information.</p>
+              
+              <div className="flex justify-end space-x-2">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowLeaveConfirmModal(false)}
+                  disabled={isLeavingHousehold}
+                >
+                  Avbryt
+                </Button>
+                
+                <Button
+                  variant="danger"
+                  onClick={handleLeaveHousehold}
+                  disabled={isLeavingHousehold}
+                >
+                  {isLeavingHousehold ? "Lämnar..." : "Lämna hushåll"}
+                </Button>
+              </div>
+            </div>
+          </Modal>
+        )}
       </div>
     </Sidebar>
   );

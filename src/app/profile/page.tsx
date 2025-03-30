@@ -8,7 +8,7 @@ import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
 import Link from "next/link";
 import { useAuthContext } from "@/components/providers/AuthProvider";
-import { updateUserProfile, getHouseholdMembers } from "@/lib/supabase";
+import { updateUserProfile, getHouseholdMembers, signOut } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 interface UserProfile {
@@ -47,6 +47,7 @@ export default function ProfilePage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [isLoadingMembers, setIsLoadingMembers] = useState<boolean>(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   // Omdirigeringskontroll - om ingen användare är inloggad och inläsningen är klar
   useEffect(() => {
@@ -231,6 +232,23 @@ export default function ProfilePage() {
     }
   };
 
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true);
+      const { error } = await signOut();
+      if (error) {
+        console.error("Fel vid utloggning:", error);
+        throw error;
+      }
+      router.push('/auth');
+    } catch (err) {
+      console.error("Fel vid utloggning:", err);
+      alert("Ett fel uppstod vid utloggning. Försök igen.");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
+
   function formatDate(dateString: string): string {
     try {
       const date = new Date(dateString);
@@ -276,7 +294,16 @@ export default function ProfilePage() {
   return (
     <Sidebar>
       <div className="p-6">
-        <h1 className="text-3xl font-bold mb-6">Min Profil</h1>
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-3xl font-bold">Min Profil</h1>
+          <Button 
+            variant="outline" 
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+          >
+            {isLoggingOut ? "Loggar ut..." : "Logga ut"}
+          </Button>
+        </div>
 
         {error && (
           <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-100 dark:border-yellow-800">

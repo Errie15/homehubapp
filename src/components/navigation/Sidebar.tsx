@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import Avatar from "@/components/ui/Avatar";
 import { useAuthContext } from "@/components/providers/AuthProvider";
+import HouseholdInvites from "@/components/notifications/HouseholdInvites";
 
 interface SidebarProps {
   children: React.ReactNode;
@@ -32,6 +33,13 @@ export default function Sidebar({ children }: SidebarProps) {
         <div className="p-4 border-b border-gray-200 dark:border-gray-700">
           <h1 className="text-xl font-bold text-blue-600 dark:text-blue-400">HomeHub</h1>
         </div>
+        
+        {/* Visa hushållsinbjudningar om användaren är inloggad och har en email */}
+        {user && user.email && (
+          <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+            <HouseholdInvites userId={user.id} userEmail={user.email} />
+          </div>
+        )}
         
         <nav className="flex-1 overflow-y-auto p-4">
           <ul className="space-y-2">
@@ -97,6 +105,13 @@ export default function Sidebar({ children }: SidebarProps) {
                 ✕
               </button>
             </div>
+            
+            {/* Visa hushållsinbjudningar i mobilmenyn */}
+            {user && user.email && (
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <HouseholdInvites userId={user.id} userEmail={user.email} />
+              </div>
+            )}
             
             <nav className="p-4">
               <ul className="space-y-2">

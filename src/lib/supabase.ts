@@ -545,3 +545,332 @@ export async function getHouseholdInfo(householdId: string) {
     return { data: null, error: { message: error.message || "Ett oväntat fel uppstod vid hämtning av hushållsinformation" } };
   }
 }
+
+// Typ för hushållsinbjudan
+interface HouseholdInvitation {
+  id?: string;
+  from_user_id: string;
+  from_user_name: string;
+  to_email: string;
+  household_id: string;
+  household_name: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at?: string;
+}
+
+// Funktion för att lämna ett hushåll
+export async function leaveHousehold(userId: string) {
+  try {
+    console.log("Användare lämnar hushåll:", userId);
+
+    // Kontrollera att vi har en giltig användare
+    if (!userId) {
+      console.error("leaveHousehold: Inget giltigt användar-ID skickades");
+      return { data: null, error: { message: "Inget giltigt användar-ID skickades" } };
+    }
+
+    // Uppdatera användarens profil för att ta bort hushålls-ID:t
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ household_id: null })
+      .eq('id', userId)
+      .select()
+      .single();
+    
+    if (error) {
+      console.error("Fel när användaren lämnade hushållet:", error);
+      return { data: null, error };
+    }
+
+    console.log("Användaren har lämnat hushållet:", data);
+    return { data, error: null };
+  } catch (err) {
+    const error = err as Error;
+    console.error("Oväntat fel när användaren lämnade hushållet:", error);
+    return { data: null, error: { message: error.message || "Ett oväntat fel uppstod" } };
+  }
+}
+
+// Funktion för att bjuda in en användare till ett hushåll
+export async function inviteUserToHousehold(
+  inviteData: {
+    fromUserId: string;
+    fromUserName: string;
+    toEmail: string;
+    householdId: string;
+    householdName: string;
+  }
+) {
+  try {
+    console.log("Bjuder in användare till hushåll:", inviteData);
+
+    // Validera indata
+    if (!inviteData.fromUserId || !inviteData.toEmail || !inviteData.householdId) {
+      return { 
+        data: null, 
+        error: { message: "Obligatoriska fält saknas i inbjudningsdata" } 
+      };
+    }
+
+    // Kontrollera först om tabellen 'household_invitations' finns
+    const { error: tableCheckError } = await supabase
+      .from('household_invitations')
+      .select('id')
+      .limit(1);
+    
+    if (tableCheckError) {
+      console.error("Tabellen 'household_invitations' existerar inte eller är inte tillgänglig:", tableCheckError);
+      return { 
+        data: null, 
+        error: { 
+          message: "Inbjudningssystemet är inte konfigurerat korrekt. Kontakta administratören.",
+          originalError: tableCheckError
+        } 
+      };
+    }
+
+    // Skapa inbjudningsobjekt
+    const invitation: HouseholdInvitation = {
+      from_user_id: inviteData.fromUserId,
+      from_user_name: inviteData.fromUserName,
+      to_email: inviteData.toEmail,
+      household_id: inviteData.householdId,
+      household_name: inviteData.householdName || "Hushåll",
+      status: 'pending',
+    };
+
+    // Spara inbjudan i databasen
+    const { data, error } = await supabase
+      .from('household_invitations')
+      .insert(invitation)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Fel vid inbjudan till hushåll:", error);
+      return { 
+        data: null, 
+        error: { 
+          message: error.message || "Kunde inte bjuda in medlem till hushållet.",
+          originalError: error
+        } 
+      };
+    }
+
+    console.log("Inbjudan skickad:", data);
+    return { data, error: null };
+  } catch (err) {
+    const error = err as Error;
+    console.error("Oväntat fel vid inbjudan till hushåll:", error);
+    return { 
+      data: null, 
+      error: { message: error.message || "Ett oväntat fel uppstod vid inbjudan till hushåll." } 
+    };
+  }
+}
+
+// Funktion för att hämta användarens inbjudningar
+export async function getUserInvitations(email: string) {
+  try {
+    console.log("Hämtar inbjudningar för:", email);
+
+    if (!email) {
+      return { 
+        data: [], 
+        error: { message: "E-postadress krävs för att hämta inbjudningar" } 
+      };
+    }
+
+    // Kontrollera först om tabellen 'household_invitations' finns
+    const { error: tableCheckError } = await supabase
+      .from('household_invitations')
+      .select('id')
+      .limit(1);
+    
+    if (tableCheckError) {
+      console.error("Tabellen 'household_invitations' existerar inte eller är inte tillgänglig:", tableCheckError);
+      return { 
+        data: [], 
+        error: { 
+          message: "Inbjudningssystemet är inte konfigurerat korrekt. Kontakta administratören.",
+          originalError: tableCheckError
+        } 
+      };
+    }
+
+    // Hämta inbjudningar som skickats till användarens e-post
+    const { data, error } = await supabase
+      .from('household_invitations')
+      .select('*')
+      .eq('to_email', email)
+      .eq('status', 'pending');
+
+    if (error) {
+      console.error("Fel vid hämtning av inbjudningar:", error);
+      return { 
+        data: [], 
+        error: { 
+          message: error.message || "Kunde inte hämta inbjudningar.",
+          originalError: error
+        } 
+      };
+    }
+
+    console.log(`Hittade ${data?.length || 0} inbjudningar för ${email}`);
+    return { data: data || [], error: null };
+  } catch (err) {
+    const error = err as Error;
+    console.error("Oväntat fel vid hämtning av inbjudningar:", error);
+    return { 
+      data: [], 
+      error: { message: error.message || "Ett oväntat fel uppstod vid hämtning av inbjudningar." } 
+    };
+  }
+}
+
+// Funktion för att acceptera en inbjudan till ett hushåll
+export async function acceptHouseholdInvitation(invitationId: string, userId: string) {
+  try {
+    console.log("Accepterar inbjudan:", invitationId, "för användare:", userId);
+
+    if (!invitationId || !userId) {
+      return { 
+        data: null, 
+        error: { message: "Inbjudnings-ID och användar-ID krävs" } 
+      };
+    }
+
+    // Hämta inbjudningsinformation
+    const { data: invitation, error: fetchError } = await supabase
+      .from('household_invitations')
+      .select('*')
+      .eq('id', invitationId)
+      .single();
+
+    if (fetchError) {
+      console.error("Fel vid hämtning av inbjudan:", fetchError);
+      return { 
+        data: null, 
+        error: { 
+          message: fetchError.message || "Kunde inte hitta inbjudan.",
+          originalError: fetchError
+        } 
+      };
+    }
+
+    if (!invitation) {
+      return {
+        data: null,
+        error: { message: "Inbjudan kunde inte hittas." }
+      };
+    }
+
+    // Uppdatera användarens profil med det nya hushålls-ID:t
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .update({ household_id: invitation.household_id })
+      .eq('id', userId)
+      .select()
+      .single();
+
+    if (profileError) {
+      console.error("Fel vid uppdatering av användarprofil:", profileError);
+      return { 
+        data: null, 
+        error: { 
+          message: profileError.message || "Kunde inte ansluta till hushållet.",
+          originalError: profileError
+        } 
+      };
+    }
+
+    // Uppdatera inbjudans status till accepterad
+    const { error: updateError } = await supabase
+      .from('household_invitations')
+      .update({ status: 'accepted' })
+      .eq('id', invitationId);
+
+    if (updateError) {
+      console.error("Fel vid uppdatering av inbjudansstatus:", updateError);
+      // Fortsätt ändå eftersom profilen uppdaterades framgångsrikt
+    }
+
+    console.log("Inbjudan accepterad, användare ansluten till hushåll:", invitation.household_id);
+    return { data: profile, error: null };
+  } catch (err) {
+    const error = err as Error;
+    console.error("Oväntat fel vid accepterande av inbjudan:", error);
+    return { 
+      data: null, 
+      error: { message: error.message || "Ett oväntat fel uppstod vid accepterande av inbjudan." } 
+    };
+  }
+}
+
+// Funktion för att avvisa en inbjudan till ett hushåll
+export async function rejectHouseholdInvitation(invitationId: string) {
+  try {
+    console.log("Avvisar inbjudan:", invitationId);
+
+    if (!invitationId) {
+      return { 
+        data: null, 
+        error: { message: "Inbjudnings-ID krävs" } 
+      };
+    }
+
+    // Kontrollera först om inbjudan finns
+    const { data: invitation, error: checkError } = await supabase
+      .from('household_invitations')
+      .select('id')
+      .eq('id', invitationId)
+      .single();
+    
+    if (checkError) {
+      console.error("Fel vid kontroll av inbjudan:", checkError);
+      return {
+        data: null,
+        error: {
+          message: checkError.message || "Kunde inte hitta inbjudan.",
+          originalError: checkError
+        }
+      };
+    }
+    
+    if (!invitation) {
+      return {
+        data: null,
+        error: { message: "Inbjudan kunde inte hittas." }
+      };
+    }
+
+    // Uppdatera inbjudans status till avvisad
+    const { data, error } = await supabase
+      .from('household_invitations')
+      .update({ status: 'rejected' })
+      .eq('id', invitationId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Fel vid avvisning av inbjudan:", error);
+      return { 
+        data: null, 
+        error: {
+          message: error.message || "Kunde inte avvisa inbjudan.",
+          originalError: error
+        }
+      };
+    }
+
+    console.log("Inbjudan avvisad:", data);
+    return { data, error: null };
+  } catch (err) {
+    const error = err as Error;
+    console.error("Oväntat fel vid avvisning av inbjudan:", error);
+    return { 
+      data: null, 
+      error: { message: error.message || "Ett oväntat fel uppstod vid avvisning av inbjudan." } 
+    };
+  }
+}
