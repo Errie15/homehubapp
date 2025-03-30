@@ -28,7 +28,7 @@ type Profile = {
 };
 
 export default function TasksPage() {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [members, setMembers] = useState<Profile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -116,9 +116,9 @@ export default function TasksPage() {
           setError(`Fel vid hämtning av uppgifter: ${tasksError.message || 'Okänt fel'}`);
         } else if (tasksData) {
           // Lägg till displaynamn för tilldelade personer
-          const enhancedTasks = await Promise.all(tasksData.map(async (task: Task) => {
+          const enhancedTasks: Task[] = await Promise.all(tasksData.map(async (task: Task) => {
             if (task.assigned_to) {
-              const assignedMember = membersData.find(m => m.id === task.assigned_to);
+              const assignedMember = membersData.find((m: Profile) => m.id === task.assigned_to);
               if (assignedMember) {
                 return {
                   ...task,
@@ -143,9 +143,9 @@ export default function TasksPage() {
           
           setTasks(enhancedTasks);
         }
-      } catch (err: any) {
+      } catch (err: Error | unknown) {
         console.error('Oväntat fel vid datahämtning:', err);
-        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+        setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
         setLoading(false);
       }
@@ -184,7 +184,7 @@ export default function TasksPage() {
       
       if (insertData) {
         // Hitta namnet på den tilldelade personen
-        const assignedMember = members.find(m => m.id === newTask.assigned_to);
+        const assignedMember = members.find((m: Profile) => m.id === newTask.assigned_to);
         const assignedName = assignedMember?.full_name || assignedMember?.email || 'Okänd';
         
         // Lägg till uppgiften i lokalt state
@@ -203,9 +203,9 @@ export default function TasksPage() {
         points: 10,
         category: 'Städning'
       });
-    } catch (err: any) {
+    } catch (err: Error | unknown) {
       console.error('Oväntat fel vid tillägg av uppgift:', err);
-      setError(`Oväntat fel vid tillägg av uppgift: ${err?.message || 'Okänt fel'}`);
+      setError(`Oväntat fel vid tillägg av uppgift: ${err instanceof Error ? err.message : 'Okänt fel'}`);
     }
   };
 
@@ -231,7 +231,7 @@ export default function TasksPage() {
           task.id === id ? { ...task, completed: !task.completed } : task
         )
       );
-    } catch (err) {
+    } catch (err: Error | unknown) {
       console.error('Oväntat fel vid uppdatering av uppgift:', err);
     }
   };

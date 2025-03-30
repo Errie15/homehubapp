@@ -25,7 +25,7 @@ type Reward = {
 };
 
 export default function RewardsPage() {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -112,7 +112,7 @@ export default function RewardsPage() {
         const { count, error: countError } = await supabase
           .from('redeemed_rewards')
           .select('id', { count: 'exact' })
-          .in('user_id', membersData?.map(m => m.id) || []);
+          .in('user_id', membersData?.map((m: Member) => m.id) || []);
           
         if (countError) {
           console.error('Fel vid hämtning av inlösta belöningar:', countError);
@@ -120,9 +120,9 @@ export default function RewardsPage() {
         } else if (count !== null) {
           setRedeemedCount(count);
         }
-      } catch (err: any) {
+      } catch (err: Error | unknown) {
         console.error('Oväntat fel vid datahämtning:', err);
-        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+        setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
         setLoading(false);
       }
@@ -134,7 +134,7 @@ export default function RewardsPage() {
   const handleRedeemReward = async () => {
     if (!selectedReward || !selectedMember) return;
     
-    const member = members.find(m => m.id === selectedMember);
+    const member = members.find((m: Member) => m.id === selectedMember);
     if (!member || member.points < selectedReward.points_cost) return;
     
     try {
@@ -161,7 +161,7 @@ export default function RewardsPage() {
       
       // Uppdatera lokal data
       setMembers(
-        members.map(m => 
+        members.map((m: Member) => 
           m.id === selectedMember 
             ? { ...m, points: m.points - selectedReward.points_cost } 
             : m
@@ -169,7 +169,7 @@ export default function RewardsPage() {
       );
       
       setRedeemedCount(prev => prev + 1);
-    } catch (err) {
+    } catch (err: Error | unknown) {
       console.error('Oväntat fel vid inlösning:', err);
     }
     

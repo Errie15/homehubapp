@@ -26,6 +26,17 @@ interface UserProfile {
   };
 }
 
+interface HouseholdMember {
+  id: string;
+  full_name: string;
+  name?: string;
+  email: string;
+  avatar_url?: string;
+  role?: string;
+  points: number;
+  completed_tasks: number;
+}
+
 export default function ProfilePage() {
   const router = useRouter();
   const { user, profile: userProfile, isLoading, error: authError } = useAuthContext();
@@ -34,7 +45,7 @@ export default function ProfilePage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [householdMembers, setHouseholdMembers] = useState<any[]>([]);
+  const [householdMembers, setHouseholdMembers] = useState<HouseholdMember[]>([]);
   const [isLoadingMembers, setIsLoadingMembers] = useState<boolean>(false);
 
   // Omdirigeringskontroll - om ingen användare är inloggad och inläsningen är klar
@@ -107,7 +118,7 @@ export default function ProfilePage() {
             let foundCurrentUser = false;
             if (data && data.length > 0) {
               // Kontrollera om den aktuella användaren redan finns i listan
-              foundCurrentUser = data.some((member: any) => member.id === user?.id);
+              foundCurrentUser = data.some((member: HouseholdMember) => member.id === user?.id);
             }
 
             // Om användaren inte finns i listan eller listan är tom men vi har ett hushåll
@@ -116,7 +127,7 @@ export default function ProfilePage() {
               const userName = userProfile.full_name || user?.user_metadata?.name || user?.email?.split('@')[0] || "Erik";
               
               // Lägg till aktuell användare i listan
-              const currentUserMember = {
+              const currentUserMember: HouseholdMember = {
                 id: user?.id || '',
                 full_name: userName,
                 name: userName,
@@ -131,7 +142,7 @@ export default function ProfilePage() {
               setHouseholdMembers(data ? [currentUserMember] : [currentUserMember]);
             } else {
               // Så att vi inte får "Namnlös användare" - ersätt med korrekt namn
-              const enhancedData = data?.map((member: any) => {
+              const enhancedData = data?.map((member: HouseholdMember) => {
                 // Om det är den aktuella användaren och den saknar namn
                 if (member.id === user?.id && (!member.full_name || member.full_name === 'Namnlös användare')) {
                   const userName = userProfile?.full_name || 

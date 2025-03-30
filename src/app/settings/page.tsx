@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Sidebar from "@/components/navigation/Sidebar";
-import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import Avatar from "@/components/ui/Avatar";
 import Input from "@/components/ui/Input";
@@ -103,7 +102,7 @@ export default function SettingsPage() {
             }));
           } else {
             // Formatera medlemsdata
-            const formattedMembers = membersData.map((member: any) => ({
+            const formattedMembers = membersData.map((member: HouseholdMember) => ({
               id: member.id,
               name: member.full_name,
               full_name: member.full_name,
@@ -137,7 +136,7 @@ export default function SettingsPage() {
         }
 
         // Formatera medlemsdata för gränssnittet
-        const formattedMembers = membersData?.map((member: any) => ({
+        const formattedMembers = membersData?.map((member: HouseholdMember) => ({
           id: member.id,
           name: member.full_name,
           full_name: member.full_name,
@@ -347,7 +346,7 @@ export default function SettingsPage() {
                             }));
                           } else {
                             // Formatera medlemmar
-                            const formattedMembers = membersData.map((member: any) => ({
+                            const formattedMembers = membersData.map((member: HouseholdMember) => ({
                               id: member.id,
                               name: member.full_name,
                               full_name: member.full_name,

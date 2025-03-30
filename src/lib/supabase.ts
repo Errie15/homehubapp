@@ -52,8 +52,22 @@ export async function getCurrentUser() {
   }
 }
 
+// Profildata typ
+interface ProfileData {
+  full_name?: string;
+  email?: string;
+  role?: string;
+  points?: number;
+  completed_tasks?: number;
+  avatar_url?: string;
+  household_id?: string;
+  notifications_enabled?: boolean;
+  theme?: string;
+  [key: string]: unknown;
+}
+
 // Användarprofilfunktioner med RLS-hantering
-export async function updateUserProfile(userId: string, profileData: any) {
+export async function updateUserProfile(userId: string, profileData: ProfileData) {
   try {
     // Använd direkta insert/update metoder med explicit id för att undvika RLS-problem
     const { data, error } = await supabase.rpc('handle_profile_upsert', {
@@ -227,8 +241,22 @@ export async function createUserProfile(userId: string, userData: {name?: string
   }
 }
 
-// Funktion för att säkerställa att en användare har ett hushåll
-export async function ensureUserHasHousehold(userId: string, profile: any) {
+// Interface för användarprofiler med hushåll
+interface UserProfileWithHousehold {
+  id: string;
+  full_name?: string;
+  email?: string; 
+  role?: string;
+  points?: number;
+  completed_tasks?: number;
+  avatar_url?: string;
+  household_id?: string;
+  notifications_enabled?: boolean;
+  theme?: string;
+  [key: string]: unknown;
+}
+
+export async function ensureUserHasHousehold(userId: string, profile: UserProfileWithHousehold) {
   try {
     console.log("Försöker skapa hushåll för användare:", userId);
     
@@ -387,7 +415,7 @@ export async function getHouseholdMembers(householdId: string) {
       return { data: [], error: { message: "Inget giltigt household_id skickades" } };
     }
 
-    // Försök först att använda RPC om den finns (för att kringgå RLS)
+    // Försök att använda RPC-anrop för att kringgå RLS om det finns
     try {
       const { data: rpcMembers, error: rpcError } = await supabase.rpc('get_household_members', { 
         target_household_id: householdId 
@@ -397,7 +425,7 @@ export async function getHouseholdMembers(householdId: string) {
         console.log("Medlemmar hämtade via RPC:", rpcMembers.length);
         
         // Formatera datat även för RPC-versionen
-        const formattedData = rpcMembers?.map((member: any) => {
+        const formattedData = rpcMembers?.map((member: UserProfileWithHousehold) => {
           // Förbättrad namnhantering: använd delar av e-postadressen om namn saknas
           const emailName = member.email?.split('@')[0] || '';
           const displayName = member.full_name || emailName || 'Användare';
@@ -440,7 +468,7 @@ export async function getHouseholdMembers(householdId: string) {
     }
     
     // Mappa om data för att säkerställa att alla fält finns
-    const formattedData = data?.map((member: any) => {
+    const formattedData = data?.map((member: UserProfileWithHousehold) => {
       // Förbättrad namnhantering: använd delar av e-postadressen om namn saknas
       const emailName = member.email?.split('@')[0] || '';
       const displayName = member.full_name || emailName || 'Användare';

@@ -14,6 +14,7 @@ interface UserProfileData {
   notifications_enabled?: boolean;
   theme?: string;
   created_at?: string;
+  [key: string]: unknown;
 }
 
 interface AuthState {
@@ -26,7 +27,7 @@ interface AuthState {
 // Interface för felmeddelanden
 interface ErrorWithMessage {
   message?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export function useAuth() {
@@ -70,7 +71,7 @@ export function useAuth() {
           let errorMessage = "Kunde inte ladda användarprofil";
           
           // Förbättra felmeddelandet för vanligt förekommande fel
-          const typedError = profileError as ErrorWithMessage;
+          const typedError = profileError as unknown as ErrorWithMessage;
           if (typedError.message?.includes("infinite recursion detected in policy")) {
             errorMessage = "Det finns ett konfigurationsfel i databasen. Kontakta administratören om felet kvarstår.";
           } else if (typedError.message) {
@@ -220,7 +221,7 @@ export function useAuth() {
     // Lyssna på autentiseringshändelser
     let authListener: { subscription: { unsubscribe: () => void } } | undefined;
     try {
-      const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      const { data: listener } = supabase.auth.onAuthStateChange(async (event) => {
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
           loadUser();
         } else if (event === 'SIGNED_OUT') {

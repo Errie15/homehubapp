@@ -34,7 +34,7 @@ type Profile = {
 };
 
 export default function SchedulePage() {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const [scheduledTasks, setScheduledTasks] = useState<CalendarEvent[]>([]);
   const [members, setMembers] = useState<Profile[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -160,9 +160,9 @@ export default function SchedulePage() {
           
           setScheduledTasks(formattedTasks);
         }
-      } catch (err: any) {
+      } catch (err: Error | unknown) {
         console.error('Oväntat fel vid datahämtning:', err);
-        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+        setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
         setLoading(false);
       }
@@ -222,9 +222,9 @@ export default function SchedulePage() {
       
       setIsModalOpen(false);
       resetForm();
-    } catch (err: any) {
+    } catch (err: Error | unknown) {
       console.error('Oväntat fel vid tillägg av uppgift:', err);
-      setError(`Oväntat fel vid tillägg av uppgift: ${err?.message || 'Okänt fel'}`);
+      setError(`Oväntat fel vid tillägg av uppgift: ${err instanceof Error ? err.message : 'Okänt fel'}`);
     }
   };
 

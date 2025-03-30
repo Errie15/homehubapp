@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Sidebar from '@/components/navigation/Sidebar';
-import { supabase, getHouseholdTasks, getUserProfile, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
+import { getHouseholdTasks, getHouseholdMembers, ensureUserHasHousehold } from '@/lib/supabase';
 import { useAuth } from '@/hooks/useAuth';
 
 // Definiera typer för data från Supabase
@@ -29,7 +29,7 @@ type HouseholdMember = {
 };
 
 export default function DashboardPage() {
-  const { user, profile } = useAuth();
+  const { profile } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [householdPoints, setHouseholdPoints] = useState<Record<string, number>>({});
   const [members, setMembers] = useState<HouseholdMember[]>([]);
@@ -121,9 +121,9 @@ export default function DashboardPage() {
             console.log('Hämtade hushållsmedlemmar:', members.length);
           }
         }
-      } catch (err: any) {
+      } catch (err: Error | unknown) {
         console.error('Oväntat fel vid datahämtning:', err);
-        setError(`Oväntat fel: ${err?.message || 'Okänt fel'}`);
+        setError(`Oväntat fel: ${err instanceof Error ? err.message : 'Okänt fel'}`);
       } finally {
         setLoading(false);
       }
