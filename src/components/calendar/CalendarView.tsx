@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo } from 'react';
 
 export type CalendarEvent = {
   id: number;
@@ -58,7 +58,7 @@ export default function CalendarView({
     <div className="overflow-x-auto">
       <div className="grid grid-cols-7 min-w-[900px]">
         {/* Veckodagsrubriker */}
-        {daysOfWeek.map((day, index) => (
+        {daysOfWeek.map((day) => (
           <div key={`header-${day}`} className="border-b border-r border-gray-200 dark:border-gray-700 p-2 bg-gray-50 dark:bg-gray-900 text-center sticky top-0 z-10">
             <h3 className="font-medium">{day}</h3>
           </div>

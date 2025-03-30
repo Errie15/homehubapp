@@ -8,7 +8,6 @@ import Avatar from "@/components/ui/Avatar";
 import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
-import Link from "next/link";
 
 interface HouseholdMember {
   id: number;

@@ -56,7 +56,21 @@ export default function ProfilePage() {
 
   const handleEditProfile = (event: React.FormEvent) => {
     event.preventDefault();
+    
     // Uppdatera profilen här
+    // Använd setProfile-funktionen för att lösa ESLint-felet
+    const formData = new FormData(event.target as HTMLFormElement);
+    const name = formData.get('name') as string;
+    const email = formData.get('email') as string;
+    const role = formData.get('role') as string;
+    
+    setProfile({
+      ...profile,
+      name: name || profile.name,
+      email: email || profile.email,
+      role: role || profile.role,
+    });
+    
     setShowEditModal(false);
   };
 
@@ -210,6 +224,7 @@ export default function ProfilePage() {
                 </label>
                 <Input
                   type="text"
+                  name="name"
                   defaultValue={profile.name}
                   placeholder="Ditt namn"
                 />
@@ -220,6 +235,7 @@ export default function ProfilePage() {
                 </label>
                 <Input
                   type="email"
+                  name="email"
                   defaultValue={profile.email}
                   placeholder="Din e-post"
                 />
@@ -230,6 +246,7 @@ export default function ProfilePage() {
                 </label>
                 <Input
                   type="text"
+                  name="role"
                   defaultValue={profile.role}
                   placeholder="Din roll"
                 />

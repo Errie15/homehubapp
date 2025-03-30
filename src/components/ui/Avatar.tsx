@@ -1,4 +1,5 @@
 import { CSSProperties } from 'react';
+import Image from 'next/image';
 
 interface AvatarProps {
   src?: string;
@@ -25,6 +26,14 @@ export default function Avatar({
     md: 'w-10 h-10 text-base',
     lg: 'w-12 h-12 text-lg',
     xl: 'w-16 h-16 text-xl',
+  };
+
+  const sizePx = {
+    xs: 24,
+    sm: 32,
+    md: 40,
+    lg: 48,
+    xl: 64,
   };
   
   const statusClasses = {
@@ -66,11 +75,16 @@ export default function Avatar({
       style={style}
     >
       {src ? (
-        <img 
-          src={src} 
-          alt={alt || name || 'Avatar'} 
-          className="w-full h-full object-cover rounded-full"
-        />
+        <div className="w-full h-full relative overflow-hidden rounded-full">
+          <Image 
+            src={src} 
+            alt={alt || name || 'Avatar'}
+            width={sizePx[size]}
+            height={sizePx[size]}
+            className="object-cover"
+            priority
+          />
+        </div>
       ) : (
         <div 
           className={`flex items-center justify-center w-full h-full rounded-full text-white ${getBackgroundColor()}`}
