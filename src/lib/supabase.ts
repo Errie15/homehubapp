@@ -926,30 +926,14 @@ export async function getRedeemedRewards(householdId: string) {
       return { data: [], error: { message: 'Ogiltigt household_id' } };
     }
 
-    // Först hämtar vi alla rewards för hushållet
-    const { data: rewards, error: rewardsError } = await supabase
-      .from('rewards')
-      .select('id')
-      .eq('household_id', householdId);
-      
-    if (rewardsError) {
-      console.error('Fel vid hämtning av rewards för household:', rewardsError);
-      return { data: [], error: rewardsError };
-    }
-    
-    if (!rewards || rewards.length === 0) {
-      // Inga belöningar finns, returnera tom lista utan fel
-      return { data: [], error: null };
-    }
-    
-    // Sedan hämtar vi alla inlösta belöningar för dessa rewards
-    // Vi exkluderar created_at eftersom den kolumnen inte existerar
+    // Hämta alla inlösta belöningar med både reward och profile information i en enda query
     const { data: redeemedData, error: redeemedError } = await supabase
       .from('redeemed_rewards')
       .select(`
         id,
         reward_id,
         user_id,
+        redeemed_at,
         rewards:reward_id (
           id, 
           title, 
@@ -957,9 +941,14 @@ export async function getRedeemedRewards(householdId: string) {
           points_cost, 
           image, 
           household_id
+        ),
+        profiles:user_id (
+          id,
+          name,
+          email,
+          avatar_url
         )
-      `)
-      .in('reward_id', rewards.map(r => r.id));
+      `);
       
     if (redeemedError) {
       console.error('Fel vid hämtning av redeemed_rewards:', redeemedError);
@@ -967,105 +956,70 @@ export async function getRedeemedRewards(householdId: string) {
     }
     
     if (!redeemedData || redeemedData.length === 0) {
-      // Inga inlösta belöningar finns, returnera tom lista utan fel
       return { data: [], error: null };
     }
-    
-    // För varje inlöst belöning, hämta användarinformation separat men med getUserProfile
-    // vilket hanterar RLS-begränsningar bättre
-    const enhancedData = await Promise.all(
-      redeemedData.map(async (redeemedReward) => {
-        try {
-          // Konsistentkontroll på rewards-objektet
-          const rewards = redeemedReward.rewards;
-          
-          // Om rewards är en array, använd första elementet
-          const rewardsObject = Array.isArray(rewards) && rewards.length > 0 
-            ? rewards[0] 
-            : (rewards || {
-                id: redeemedReward.reward_id,
-                title: 'Okänd belöning',
-                description: null,
-                points_cost: 0,
-                image: null,
-                household_id: householdId
-              });
-              
-          // Använd getUserProfile istället för direkt anrop till profiles-tabellen  
-          // Detta hanterar RLS-begränsningar och returnerar alltid ett profilobjekt med åtminstone ett ID
-          const { data: profileData, error: profileError } = await getUserProfile(redeemedReward.user_id);
-          
-          if (profileError || !profileData) {
-            console.warn('Varning: Kunde inte hämta fullständig profil för användare:', 
-                         redeemedReward.user_id, 
-                         profileError ? profileError.message || JSON.stringify(profileError) : 'Ingen data');
-                         
-            // Returnera default-värden om vi inte kan hämta profilen
-            return {
-              id: redeemedReward.id,
-              reward_id: redeemedReward.reward_id,
-              user_id: redeemedReward.user_id,
-              // Lägg till ett datum för sortering (nuvarande datum)
-              created_at: new Date().toISOString(),
-              rewards: rewardsObject,
-              profiles: {
-                id: redeemedReward.user_id,
-                full_name: "Användare",
-                email: "användare@exempel.se",
-                avatar_url: null
-              }
-            };
-          }
-          
-          return {
-            id: redeemedReward.id,
-            reward_id: redeemedReward.reward_id,
-            user_id: redeemedReward.user_id,
-            // Lägg till ett datum för sortering (nuvarande datum)
-            created_at: new Date().toISOString(),
-            rewards: rewardsObject,
-            profiles: {
-              id: profileData.id,
-              full_name: profileData.full_name || null,
-              email: profileData.email || null,
-              avatar_url: profileData.avatar_url || null
-            }
+
+    // Filtrera resultat baserat på hushålls-ID
+    const filteredData = redeemedData.filter(item => {
+      const rewards = item.rewards;
+      // Kontrollera om rewards är ett objekt (inte array) och har household_id
+      if (!rewards) return false;
+      
+      // Om rewards är en array, kolla första objektet
+      if (Array.isArray(rewards) && rewards.length > 0) {
+        return rewards[0].household_id === householdId;
+      }
+      
+      // Om rewards är ett objekt, kontrollera household_id direkt
+      return typeof rewards === 'object' && 'household_id' in rewards && rewards.household_id === householdId;
+    });
+
+    if (filteredData.length === 0) {
+      return { data: [], error: null };
+    }
+
+    // Bearbeta och formatera data
+    const enhancedData = filteredData.map((redeemedReward) => {
+      // Hantera rewards-objektet
+      const rewards = Array.isArray(redeemedReward.rewards) && redeemedReward.rewards.length > 0 
+        ? redeemedReward.rewards[0] 
+        : (redeemedReward.rewards || {
+            id: redeemedReward.reward_id,
+            title: 'Okänd belöning',
+            description: null,
+            points_cost: 0,
+            image: null,
+            household_id: householdId
+          });
+
+      // Hantera profiles-objektet och mappa name till full_name
+      const profileData = redeemedReward.profiles && !Array.isArray(redeemedReward.profiles) 
+        ? redeemedReward.profiles 
+        : {
+            id: redeemedReward.user_id,
+            name: "Okänd användare",
+            email: null,
+            avatar_url: null
           };
-        } catch (itemErr) {
-          // Hantera fel på individuell belöningsnivå för att förhindra att hela operationen misslyckas
-          console.error('Fel vid bearbetning av inlöst belöning:', 
-                       redeemedReward.id, 
-                       itemErr instanceof Error ? itemErr.message : 'Okänt fel');
-                       
-          // Returnera en basversion med default-värden
-          return {
-            id: redeemedReward.id,
-            reward_id: redeemedReward.reward_id,
-            user_id: redeemedReward.user_id,
-            created_at: new Date().toISOString(),
-            rewards: {
-              id: redeemedReward.reward_id,
-              title: 'Belöning',
-              description: null,
-              points_cost: 0,
-              image: null,
-              household_id: householdId
-            },
-            profiles: {
-              id: redeemedReward.user_id,
-              full_name: null,
-              email: null,
-              avatar_url: null
-            }
-          };
+
+      return {
+        id: redeemedReward.id,
+        reward_id: redeemedReward.reward_id,
+        user_id: redeemedReward.user_id,
+        created_at: redeemedReward.redeemed_at || new Date().toISOString(),
+        rewards,
+        profiles: {
+          id: profileData.id,
+          full_name: profileData.name, // Mappa name till full_name för frontend
+          email: profileData.email,
+          avatar_url: profileData.avatar_url
         }
-      })
-    );
+      };
+    });
     
-    // Sortera resultat med de senaste först (baserat på id eftersom created_at inte finns)
+    // Sortera resultat med de senaste först
     const sortedData = enhancedData.sort((a, b) => {
-      // Sortera efter id i fallande ordning (nyare IDs antas ha högre värden)
-      return b.id.localeCompare(a.id);
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     
     return { data: sortedData, error: null };

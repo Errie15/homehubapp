@@ -13,6 +13,12 @@ CREATE TABLE IF NOT EXISTS household_invitations (
 -- Aktivera Row Level Security
 ALTER TABLE household_invitations ENABLE ROW LEVEL SECURITY;
 
+-- Ta bort eventuella befintliga policyer för att undvika dubbletter
+DROP POLICY IF EXISTS "Användare kan se inbjudningar de har skickat" ON household_invitations;
+DROP POLICY IF EXISTS "Användare kan se inbjudningar de har fått" ON household_invitations;
+DROP POLICY IF EXISTS "Användare kan skapa inbjudningar för sitt hushåll" ON household_invitations;
+DROP POLICY IF EXISTS "Användare kan uppdatera status för inbjudningar de har fått" ON household_invitations;
+
 -- RLS-policys för inbjudningar
 -- Tillåt användare att se inbjudningar de har skickat
 CREATE POLICY "Användare kan se inbjudningar de har skickat"
